@@ -1,6 +1,12 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously } from 'firebase/auth';
-import { getFirestore, setLogLevel } from 'firebase/firestore';
+import { 
+  initializeFirestore, 
+  persistentLocalCache, 
+  persistentMultipleTabManager,
+  getFirestore,
+  setLogLevel 
+} from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase
@@ -13,7 +19,21 @@ try {
   console.warn("setLogLevel failed to initialize:", e);
 }
 
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+// Safely initialize Firestore with robust offline persistent cache
+let dbInstance;
+try {
+  dbInstance = initializeFirestore(app, {
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager()
+    })
+  }, firebaseConfig.firestoreDatabaseId);
+  console.info("Firestore initialized with multi-tab offline persistent cache.");
+} catch (error) {
+  console.warn("Persistent cache not supported. Cascading to memory cache/standard Firestore:", error);
+  dbInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+}
+
+export const db = dbInstance;
 export const auth = getAuth(app);
 
 // Simple auto-sign-in to satisfy custom firestore rules if enabled
