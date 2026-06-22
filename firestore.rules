@@ -1,0 +1,352 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Default-deny catch-all safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions for validation
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function isValidSnapshot(data) {
+      return data.keys().hasAll([
+        'referenceMonth',
+        'savedAt',
+        'savedBy',
+        'totalPvfCount',
+        'totalBilling',
+        'contracts',
+        'prices',
+        'createdAt'
+      ]) 
+      && data.keys().size() == 8
+      && data.referenceMonth is string
+      && data.referenceMonth.size() <= 50
+      && data.savedBy is string
+      && data.savedBy.size() <= 150
+      && data.savedAt is string
+      && data.savedAt.size() <= 50
+      && data.totalPvfCount is int
+      && (data.totalBilling is float || data.totalBilling is int)
+      && data.contracts is list
+      && data.prices is map
+      && data.createdAt == request.time;
+    }
+
+    function isValidContract(data) {
+      return data.keys().hasAll([
+        'id',
+        'contrato',
+        'secretaria',
+        'quantities',
+        'status',
+        'dataAssinatura'
+      ])
+      && data.id is string
+      && data.id.size() <= 64
+      && data.contrato is string
+      && data.contrato.size() <= 200
+      && data.secretaria is string
+      && data.secretaria.size() <= 200
+      && data.quantities is map
+      && data.status is string
+      && data.status.size() <= 20
+      && data.dataAssinatura is string
+      && data.dataAssinatura.size() <= 50;
+    }
+
+    function isValidPrices(data) {
+      return data.keys().hasAll([
+        'analogico',
+        'semFio',
+        'extensao',
+        'dBasico',
+        'dEspecial',
+        'ipBasico',
+        'fCabeca',
+        'sMesa',
+        'software',
+        'virtual'
+      ])
+      && data.keys().size() == 10
+      && (data.analogico is float || data.analogico is int)
+      && (data.semFio is float || data.semFio is int)
+      && (data.extensao is float || data.extensao is int)
+      && (data.dBasico is float || data.dBasico is int)
+      && (data.dEspecial is float || data.dEspecial is int)
+      && (data.ipBasico is float || data.ipBasico is int)
+      && (data.fCabeca is float || data.fCabeca is int)
+      && (data.sMesa is float || data.sMesa is int)
+      && (data.software is float || data.software is int)
+      && (data.virtual is float || data.virtual is int);
+    }
+
+    function isValidUmTelecomRecord(data) {
+      return data.keys().hasAll([
+        'id',
+        'referenceMonth',
+        'category',
+        'osNumber',
+        'date',
+        'location',
+        'notes'
+      ])
+      && data.id is string
+      && data.id.size() <= 128
+      && data.referenceMonth is string
+      && data.referenceMonth.size() <= 50
+      && data.category is string
+      && data.category.size() <= 64
+      && data.osNumber is string
+      && data.osNumber.size() <= 30
+      && data.date is string
+      && data.date.size() <= 50
+      && data.location is string
+      && data.location.size() <= 200
+      && data.notes is string
+      && data.notes.size() <= 2000
+      && (!data.keys().hasAll(['solution']) || data.solution is string)
+      && (!data.keys().hasAll(['type']) || data.type == null || data.type is string);
+    }
+
+    function isValidPvfMonthlyContract(data) {
+      return data.keys().hasAll([
+        'id',
+        'contrato',
+        'secretaria',
+        'quantities',
+        'status',
+        'dataAssinatura',
+        'referenceMonth'
+      ])
+      && data.id is string
+      && data.id.size() <= 128
+      && data.contrato is string
+      && data.contrato.size() <= 200
+      && data.secretaria is string
+      && data.secretaria.size() <= 200
+      && data.quantities is map
+      && data.status is string
+      && data.status.size() <= 20
+      && data.dataAssinatura is string
+      && data.dataAssinatura.size() <= 50
+      && data.referenceMonth is string
+      && data.referenceMonth.size() <= 50
+      && (!data.keys().hasAll(['observacoes']) || data.observacoes is string);
+    }
+
+    function isValidStarlinkRecord(data) {
+      return data.keys().hasAll([
+        'id',
+        'referenceMonth',
+        'date',
+        'protocol',
+        'location',
+        'description',
+        'solution',
+        'billingValue'
+      ])
+      && data.keys().size() == 8
+      && data.id is string
+      && data.id.size() <= 128
+      && data.referenceMonth is string
+      && data.referenceMonth.size() <= 50
+      && data.date is string
+      && data.date.size() <= 50
+      && data.protocol is string
+      && data.protocol.size() <= 100
+      && data.location is string
+      && data.location.size() <= 200
+      && data.description is string
+      && data.description.size() <= 2000
+      && data.solution is string
+      && (data.solution == 'Interior' || data.solution == 'Noronha' || data.solution == 'Ativação PCM')
+      && (data.billingValue is float || data.billingValue is int);
+    }
+
+    function isValidVectraRecord(data) {
+      return data.keys().hasAll([
+        'id',
+        'referenceMonth',
+        'date',
+        'protocol',
+        'location',
+        'description',
+        'category',
+        'solution'
+      ])
+      && data.keys().size() == 8
+      && data.id is string
+      && data.id.size() <= 128
+      && data.referenceMonth is string
+      && data.referenceMonth.size() <= 50
+      && data.date is string
+      && data.date.size() <= 50
+      && data.protocol is string
+      && data.protocol.size() <= 100
+      && data.location is string
+      && data.location.size() <= 200
+      && data.description is string
+      && data.description.size() <= 2000
+      && data.category is string
+      && (data.category == 'wifi' || data.category == 'utm')
+      && data.solution is string
+      && data.solution.size() <= 2000;
+    }
+
+    function isValidContactCenterRecord(data) {
+      return data.keys().hasAll([
+        'id',
+        'contrato',
+        'secretaria',
+        'referenceMonth',
+        'status',
+        'nmsBasico',
+        'nmsCritico',
+        'gravacaoBasica',
+        'gravacaoCritica',
+        'uraBasica',
+        'uraCritica'
+      ])
+      && data.id is string
+      && data.id.size() <= 128
+      && data.contrato is string
+      && data.contrato.size() <= 200
+      && data.secretaria is string
+      && data.secretaria.size() <= 200
+      && data.referenceMonth is string
+      && data.referenceMonth.size() <= 50
+      && data.status is string
+      && data.status.size() <= 20
+      && (data.nmsBasico is int || data.nmsBasico is float)
+      && (data.nmsCritico is int || data.nmsCritico is float)
+      && (data.gravacaoBasica is int || data.gravacaoBasica is float)
+      && (data.gravacaoCritica is int || data.gravacaoCritica is float)
+      && (data.uraBasica is int || data.uraBasica is float)
+      && (data.uraCritica is int || data.uraCritica is float)
+      && (!('observacoes' in data) || data.observacoes is string)
+      && (!('dataAssinatura' in data) || data.dataAssinatura is string);
+    }
+
+    function isValidContactCenterPrices(data) {
+      return data.keys().hasAll([
+        'nmsBasico',
+        'nmsCritico',
+        'gravacaoBasica',
+        'gravacaoCritica',
+        'uraBasica',
+        'uraCritica'
+      ])
+      && data.keys().size() == 6
+      && (data.nmsBasico is float || data.nmsBasico is int)
+      && (data.nmsCritico is float || data.nmsCritico is int)
+      && (data.gravacaoBasica is float || data.gravacaoBasica is int)
+      && (data.gravacaoCritica is float || data.gravacaoCritica is int)
+      && (data.uraBasica is float || data.uraBasica is int)
+      && (data.uraCritica is float || data.uraCritica is int);
+    }
+
+    function isValidVectraPrices(data) {
+      return data.keys().hasAll([
+        'limitWifi',
+        'baseCostWifi',
+        'excedenteWifi',
+        'limitUtm',
+        'baseCostUtm',
+        'excedenteUtm'
+      ])
+      && data.keys().size() == 6
+      && data.limitWifi is int
+      && (data.baseCostWifi is float || data.baseCostWifi is int)
+      && (data.excedenteWifi is float || data.excedenteWifi is int)
+      && data.limitUtm is int
+      && (data.baseCostUtm is float || data.baseCostUtm is int)
+      && (data.excedenteUtm is float || data.excedenteUtm is int);
+    }
+
+    // test connectivity collection rules
+    match /test/{docId} {
+      allow read, write: if true;
+    }
+
+    // contracts rules
+    match /contracts/{contractId} {
+      allow read: if true;
+      allow create, update: if isValidId(contractId) && isValidContract(incoming());
+      allow delete: if isValidId(contractId);
+    }
+
+    // systemPrices rules
+    match /systemPrices/{docId} {
+      allow read: if true;
+      allow create, update: if isValidId(docId) && (
+        (docId == 'current' && isValidPrices(incoming())) ||
+        (docId == 'contactCenter' && isValidContactCenterPrices(incoming())) ||
+        (docId == 'vectra' && isValidVectraPrices(incoming()))
+      );
+      allow delete: if isValidId(docId);
+    }
+
+    // monthlyBillingSnapshots rules
+    // Snapshots represent historical audit-proof records of billing at a point in time. 
+    // They can be created and read by the system, and are immutable (cannot be updated or deleted) to prevent tampering.
+    match /monthlyBillingSnapshots/{snapshotId} {
+      allow get, list: if true;
+      allow create: if isValidId(snapshotId) && isValidSnapshot(incoming());
+      allow update: if false;
+      allow delete: if isValidId(snapshotId);
+    }
+
+    // umTelecomRecords rules
+    match /umTelecomRecords/{recordId} {
+      allow read: if true;
+      allow create, update: if isValidId(recordId) && isValidUmTelecomRecord(incoming());
+      allow delete: if isValidId(recordId);
+    }
+
+    // pvfMonthlyContracts rules
+    match /pvfMonthlyContracts/{contractId} {
+      allow read: if true;
+      allow create, update: if isValidId(contractId) && isValidPvfMonthlyContract(incoming());
+      allow delete: if isValidId(contractId);
+    }
+
+    // starlinkRecords rules
+    match /starlinkRecords/{recordId} {
+      allow read: if true;
+      allow create, update: if isValidId(recordId) && isValidStarlinkRecord(incoming());
+      allow delete: if isValidId(recordId);
+    }
+
+    // vectraRecords rules
+    match /vectraRecords/{recordId} {
+      allow read: if true;
+      allow create, update: if isValidId(recordId) && isValidVectraRecord(incoming());
+      allow delete: if isValidId(recordId);
+    }
+
+    // contactCenterRecords rules
+    match /contactCenterRecords/{recordId} {
+      allow read: if true;
+      allow create, update: if isValidId(recordId) && isValidContactCenterRecord(incoming());
+      allow delete: if isValidId(recordId);
+    }
+
+    // systemUsers rules
+    match /systemUsers/{userEmail} {
+      allow read, write: if true;
+    }
+  }
+}

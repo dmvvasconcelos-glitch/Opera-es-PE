@@ -1,0 +1,254 @@
+{
+  "entities": {
+    "Contract": {
+      "title": "Contract",
+      "description": "Represents a custom telecom contract with dynamic PVF quantities and state information.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The ID of the contract"
+        },
+        "contrato": {
+          "type": "string",
+          "description": "The name or number of the contract"
+        },
+        "secretaria": {
+          "type": "string",
+          "description": "The associated department or department name"
+        },
+        "quantities": {
+          "type": "object",
+          "description": "Map of PVF key to its point count"
+        },
+        "status": {
+          "type": "string",
+          "description": "State status representing Ativo / Suspenso / Encerrado"
+        },
+        "dataAssinatura": {
+          "type": "string",
+          "description": "The date when the contract was signed"
+        },
+        "observacoes": {
+          "type": "string",
+          "description": "Optional notes or comments about the contract"
+        }
+      },
+      "required": ["id", "contrato", "secretaria", "quantities", "status", "dataAssinatura"]
+    },
+    "PvfPrices": {
+      "title": "PvfPrices",
+      "description": "Individual premium and standard PVF unit multi-rate chart values.",
+      "type": "object",
+      "properties": {
+        "analogico": { "type": "number" },
+        "semFio": { "type": "number" },
+        "extensao": { "type": "number" },
+        "dBasico": { "type": "number" },
+        "dEspecial": { "type": "number" },
+        "ipBasico": { "type": "number" },
+        "fCabeca": { "type": "number" },
+        "sMesa": { "type": "number" },
+        "software": { "type": "number" },
+        "virtual": { "type": "number" }
+      },
+      "required": [
+        "analogico", "semFio", "extensao", "dBasico", "dEspecial",
+        "ipBasico", "fCabeca", "sMesa", "software", "virtual"
+      ]
+    },
+    "MonthlyBillingSnapshot": {
+      "title": "Monthly Billing Snapshot",
+      "description": "A snapshot of the monthly billing, including contract details, prices, totals, and metadata about who saved it and when.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier of the snapshot"
+        },
+        "referenceMonth": {
+          "type": "string",
+          "description": "The selected reference month, e.g. 'Junho/2026'"
+        },
+        "savedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp when the snapshot was saved"
+        },
+        "savedBy": {
+          "type": "string",
+          "description": "Full name of the user who performed the save"
+        },
+        "totalPvfCount": {
+          "type": "integer",
+          "description": "Total sum of PVF points across all contracts at the moment of saving"
+        },
+        "totalBilling": {
+          "type": "number",
+          "description": "Total estimated billing across all contracts at the moment of saving"
+        },
+        "contracts": {
+          "type": "array",
+          "description": "A list of contracts snapshots included in this billing"
+        },
+        "prices": {
+          "type": "object",
+          "description": "Snapshot of the individual PVF unit prices used for this calculation"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        }
+      },
+      "required": [
+        "referenceMonth",
+        "savedAt",
+        "savedBy",
+        "totalPvfCount",
+        "totalBilling",
+        "contracts",
+        "prices",
+        "createdAt"
+      ]
+    },
+    "UmTelecomRecord": {
+      "title": "UmTelecomRecord",
+      "description": "Represents an individual task, O.S. or event logged under the Um Telecom billing module.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "referenceMonth": { "type": "string" },
+        "category": { "type": "string" },
+        "type": { "type": "string" },
+        "osNumber": { "type": "string" },
+        "date": { "type": "string" },
+        "location": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "required": ["id", "referenceMonth", "category", "osNumber", "date", "location"]
+    },
+    "PvfMonthlyContract": {
+      "title": "PvfMonthlyContract",
+      "description": "Represents a custom telecom contract with dynamic PVF quantities specifically associated with a reference month state.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "contrato": { "type": "string" },
+        "secretaria": { "type": "string" },
+        "quantities": { "type": "object" },
+        "status": { "type": "string" },
+        "dataAssinatura": { "type": "string" },
+        "referenceMonth": { "type": "string" },
+        "observacoes": { "type": "string" }
+      },
+      "required": ["id", "contrato", "secretaria", "quantities", "status", "dataAssinatura", "referenceMonth"]
+    },
+    "StarlinkRecord": {
+      "title": "StarlinkRecord",
+      "description": "Represents an individual Starlink task, O.S. or event logged under the Starlink module.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "referenceMonth": { "type": "string" },
+        "date": { "type": "string" },
+        "protocol": { "type": "string" },
+        "location": { "type": "string" },
+        "description": { "type": "string" },
+        "solution": { "type": "string", "enum": ["Interior", "Noronha", "Ativação PCM"] },
+        "billingValue": { "type": "number" }
+      },
+      "required": ["id", "referenceMonth", "date", "protocol", "location", "description", "solution", "billingValue"]
+    },
+    "VectraRecord": {
+      "title": "VectraRecord",
+      "description": "Represents an individual Vectra task, O.S. or event logged under the Vectra module.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "referenceMonth": { "type": "string" },
+        "date": { "type": "string" },
+        "protocol": { "type": "string" },
+        "location": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string", "enum": ["wifi", "utm"] },
+        "solution": { "type": "string" }
+      },
+      "required": ["id", "referenceMonth", "date", "protocol", "location", "description", "category", "solution"]
+    },
+    "ContactCenterRecord": {
+      "title": "ContactCenterRecord",
+      "description": "Represents an individual contract/item in the Contact Center billing module.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "contrato": { "type": "string" },
+        "secretaria": { "type": "string" },
+        "referenceMonth": { "type": "string" },
+        "status": { "type": "string" },
+        "nmsBasico": { "type": "integer" },
+        "nmsCritico": { "type": "integer" },
+        "gravacaoBasica": { "type": "integer" },
+        "gravacaoCritica": { "type": "integer" },
+        "uraBasica": { "type": "integer" },
+        "uraCritica": { "type": "integer" },
+        "observacoes": { "type": "string" },
+        "dataAssinatura": { "type": "string" }
+      },
+      "required": [
+        "id", "contrato", "secretaria", "referenceMonth", "status",
+        "nmsBasico", "nmsCritico", "gravacaoBasica", "gravacaoCritica", "uraBasica", "uraCritica"
+      ]
+    },
+    "ContactCenterPrices": {
+      "title": "ContactCenterPrices",
+      "description": "Pricing configuration values for Contact Center billing.",
+      "type": "object",
+      "properties": {
+        "nmsBasico": { "type": "number" },
+        "nmsCritico": { "type": "number" },
+        "gravacaoBasica": { "type": "number" },
+        "gravacaoCritica": { "type": "number" },
+        "uraBasica": { "type": "number" },
+        "uraCritica": { "type": "number" }
+      },
+      "required": [
+        "nmsBasico", "nmsCritico", "gravacaoBasica", "gravacaoCritica", "uraBasica", "uraCritica"
+      ]
+    }
+  },
+  "firestore": {
+    "/contracts/{contractId}": {
+      "schema": "Contract",
+      "description": "Collection of telecom contracts registered by system admins and managers."
+    },
+    "/systemPrices/{docId}": {
+      "schema": "PvfPrices",
+      "description": "Collection housing system-wide active currency prices (systemPrices/current for PVF and systemPrices/contactCenter for Contact Center)."
+    },
+    "/monthlyBillingSnapshots/{snapshotId}": {
+      "schema": "MonthlyBillingSnapshot",
+      "description": "Collection of saved billing snapshots for reference months"
+    },
+    "/umTelecomRecords/{recordId}": {
+      "schema": "UmTelecomRecord",
+      "description": "Collection storing electrical O.Ss, PCM maintenance, and activation events for Um Telecom module."
+    },
+    "/pvfMonthlyContracts/{contractId}": {
+      "schema": "PvfMonthlyContract",
+      "description": "Collection storing customized month-by-month contract quantities and states."
+    },
+    "/starlinkRecords/{recordId}": {
+      "schema": "StarlinkRecord",
+      "description": "Collection storing Starlink O.Ss, maintenance, and solutions for Starlink module."
+    },
+    "/vectraRecords/{recordId}": {
+      "schema": "VectraRecord",
+      "description": "Collection storing Vectra O.Ss, Wifi, and UTM events for Vectra Module."
+    },
+    "/contactCenterRecords/{recordId}": {
+      "schema": "ContactCenterRecord",
+      "description": "Collection storing Contact Center virtual/on-premise queue systems, SMS queues, recording nodes, and contract setups."
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Operação PE - Método Telecom",
+  "description": "Portal corporativo premium de gestão de contratos, faturamento de PVFs, relógios analíticos e exportação de relatórios.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
