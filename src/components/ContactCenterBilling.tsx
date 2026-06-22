@@ -15,7 +15,8 @@ import {
   onSnapshot, 
   writeBatch,
   serverTimestamp,
-  getDocs
+  getDocs,
+  getDoc
 } from 'firebase/firestore';
 import { 
   Search, 
@@ -258,10 +259,23 @@ export default function ContactCenterBilling() {
           // Ignore if empty snapshot from local cache to prevent default overwrites during connection phase
           return;
         }
-        const isSeeded = localStorage.getItem('cc_seeded_v6') === 'true';
+
+        let isAlreadySeededDB = false;
+        try {
+          const seedMetaDoc = await getDoc(doc(db, 'test', 'seeding_metadata'));
+          if (seedMetaDoc.exists() && seedMetaDoc.data()?.contactCenter === true) {
+            isAlreadySeededDB = true;
+          }
+        } catch (smErr) {
+          console.warn("Could not retrieve remote seeding metadata for CC:", smErr);
+        }
+
+        const isSeeded = isAlreadySeededDB || localStorage.getItem('cc_seeded_v6') === 'true';
         if (isSeeded) {
           setRecords([]);
           setIsLoading(false);
+          localStorage.setItem('cc_seeded_v6', 'true');
+          localStorage.setItem('cc_replicated_v6', 'true');
           return;
         }
 
@@ -289,6 +303,10 @@ export default function ContactCenterBilling() {
               batch.set(docRef, replicatedRecord);
             });
           });
+
+          // Save seeding indication to DB as well
+          const seedMetaRef = doc(db, 'test', 'seeding_metadata');
+          batch.set(seedMetaRef, { contactCenter: true }, { merge: true });
 
           await batch.commit();
           localStorage.setItem('cc_seeded_v6', 'true');
@@ -348,50 +366,7 @@ export default function ContactCenterBilling() {
     return () => unsub();
   }, []);
 
-  // One-time cleanup of legacy future month data (Julho - Dezembro)
-  useEffect(() => {
-    const cleanFutureMonthsCC = async () => {
-      try {
-        const clearedKey = 'cc_future_months_cleared_v2';
-        if (localStorage.getItem(clearedKey) === 'true') {
-          return;
-        }
 
-        const q = collection(db, 'contactCenterRecords');
-        const querySnapshot = await getDocs(q);
-        const futureMonths = [
-          'Julho/2026',
-          'Agosto/2026',
-          'Setembro/2026',
-          'Outubro/2026',
-          'Novembro/2026',
-          'Dezembro/2026'
-        ];
-
-        let deleteCount = 0;
-        const batch = writeBatch(db);
-        for (const docSnap of querySnapshot.docs) {
-          const data = docSnap.data();
-          if (data && futureMonths.includes(data.referenceMonth)) {
-            batch.delete(doc(db, 'contactCenterRecords', docSnap.id));
-            deleteCount++;
-          }
-        }
-
-        if (deleteCount > 0) {
-          await batch.commit();
-          console.log(`[Contact Center] Cleaned up ${deleteCount} legacy items from future months.`);
-        }
-        localStorage.setItem(clearedKey, 'true');
-      } catch (err) {
-        console.error("Erro no cleanup de meses futuros Contact Center:", err);
-      }
-    };
-
-    if (records.length > 0) {
-      cleanFutureMonthsCC();
-    }
-  }, [records]);
 
   // Sync form default reference month when selected outer month changes
   useEffect(() => {

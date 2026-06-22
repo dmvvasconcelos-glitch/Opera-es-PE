@@ -24,7 +24,7 @@ import {
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, getDoc, writeBatch } from 'firebase/firestore';
 
 interface UmTelecomRecord {
   id: string;
@@ -174,18 +174,37 @@ export default function UmTelecomBilling() {
           // Ignore if empty snapshot from local cache to prevent default overwrites during connection phase
           return;
         }
-        if (localStorage.getItem('umtelecom_seeded_v1') === 'true') {
+
+        let isAlreadySeededDB = false;
+        try {
+          const seedMetaDoc = await getDoc(doc(db, 'test', 'seeding_metadata'));
+          if (seedMetaDoc.exists() && seedMetaDoc.data()?.umtelecom === true) {
+            isAlreadySeededDB = true;
+          }
+        } catch (smErr) {
+          console.warn("Could not retrieve remote seeding metadata for Um Telecom:", smErr);
+        }
+
+        if (isAlreadySeededDB || localStorage.getItem('umtelecom_seeded_v1') === 'true') {
           console.log("Database cleared of Um Telecom records by preference, skipping automatic seeding.");
           setDbRecords([]);
           setIsLoading(false);
+          localStorage.setItem('umtelecom_seeded_v1', 'true');
           return;
         }
         console.log("Sem registros do Um Telecom no banco de dados, populando conjunto padrão do Um Telecom...");
         try {
           // Seed the PRESEEDED_RECORDS to Firestore if there are no records yet
-          for (const item of PRESEEDED_RECORDS) {
-            await setDoc(doc(db, 'umTelecomRecords', item.id), item);
-          }
+          const batch = writeBatch(db);
+          PRESEEDED_RECORDS.forEach((item) => {
+            batch.set(doc(db, 'umTelecomRecords', item.id), item);
+          });
+          
+          // Save seeding indication to DB as well
+          const seedMetaRef = doc(db, 'test', 'seeding_metadata');
+          batch.set(seedMetaRef, { umtelecom: true }, { merge: true });
+
+          await batch.commit();
           localStorage.setItem('umtelecom_seeded_v1', 'true');
           return;
         } catch (writeErr) {

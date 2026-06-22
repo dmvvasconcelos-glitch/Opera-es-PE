@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Contract, PvfPrices, UserSession, ActiveTab } from './types';
 import { INITIAL_CONTRACTS, INITIAL_PRICES, getContractPvfTotal, getContractValue, formatCurrency } from './data';
@@ -53,6 +53,13 @@ import {
 export default function App() {
   // Authentication Session State
   const [user, setUser] = useState<UserSession | null>(null);
+  const [sessionExpiredMessage, setSessionExpiredMessage] = useState<string>('');
+  
+  // Inactivity timeout tracking
+  const lastActivityRef = useRef<number>(Date.now());
+  const updateActivityTime = useCallback(() => {
+    lastActivityRef.current = Date.now();
+  }, []);
   
   // Contracts and pricing states
   const [contracts, setContracts] = useState<Contract[]>([]);
@@ -117,12 +124,24 @@ export default function App() {
               // Ignore empty snapshot from local cache to prevent default overwrites during connection phase
               return;
             }
-            if (localStorage.getItem('portal_gestao_contracts_seeded') === 'true') {
+
+            let isAlreadySeededDB = false;
+            try {
+              const seedMetaDoc = await getDoc(doc(db, 'test', 'seeding_metadata'));
+              if (seedMetaDoc.exists() && seedMetaDoc.data()?.contracts === true) {
+                isAlreadySeededDB = true;
+              }
+            } catch (smErr) {
+              console.warn("Could not retrieve remote seeding metadata for Contracts:", smErr);
+            }
+
+            if (isAlreadySeededDB || localStorage.getItem('portal_gestao_contracts_seeded') === 'true') {
               console.log("Database cleared of contracts by preference, skipping automatic seeding.");
               if (isActive) {
                 setContracts([]);
                 setIsInitializing(false);
               }
+              localStorage.setItem('portal_gestao_contracts_seeded', 'true');
               return;
             }
             console.log("Sem contratos cadastrados no banco de dados, populando conjunto padrão...");
@@ -131,6 +150,10 @@ export default function App() {
               INITIAL_CONTRACTS.forEach(c => {
                 batch.set(doc(db, 'contracts', c.id), c);
               });
+              
+              const seedMetaRef = doc(db, 'test', 'seeding_metadata');
+              batch.set(seedMetaRef, { contracts: true }, { merge: true });
+
               await batch.commit();
               localStorage.setItem('portal_gestao_contracts_seeded', 'true');
             } catch (writeErr) {
@@ -302,11 +325,108 @@ export default function App() {
 
   // Logout session handler
   const handleLogout = () => {
+    if (user) {
+      const emailDocId = user.email.trim().toLowerCase();
+      setDoc(doc(db, 'systemUsers', emailDocId), {
+        lastActiveAt: ""
+      }, { merge: true }).catch(() => {});
+    }
     clearSession();
     setUser(null);
     setActiveTab('dashboard');
     setIsMobileSidebarOpen(false);
   };
+
+  // Synchronize active user presence & last login timestamps in real-time
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    const emailKey = user.email.trim().toLowerCase();
+    const userDocRef = doc(db, 'systemUsers', emailKey);
+
+    const updatePresence = async (isInitialSetup: boolean = false) => {
+      try {
+        const docSnap = await getDoc(userDocRef);
+        const nowStr = new Date().toLocaleString('pt-BR');
+        const nowIso = new Date().toISOString();
+        if (docSnap.exists()) {
+          const currentData = docSnap.data();
+          await setDoc(userDocRef, {
+            ...currentData,
+            lastLogin: isInitialSetup ? nowStr : (currentData.lastLogin || nowStr),
+            lastActiveAt: nowIso
+          }, { merge: true });
+        } else {
+          // Keep a robust fallback profile inside Firestore
+          await setDoc(userDocRef, {
+            email: user.email,
+            displayName: user.displayName,
+            role: user.role,
+            status: 'Ativo',
+            secretarias: user.secretarias || [],
+            lastLogin: nowStr,
+            lastActiveAt: nowIso
+          }, { merge: true });
+        }
+      } catch (err) {
+        console.warn("Falha ao sincronizar presença no Firestore:", err);
+      }
+    };
+
+    // Run on initial mount or session restore with true flag
+    updatePresence(true);
+
+    // Heartbeat every 20 seconds
+    const interval = setInterval(() => {
+      const msSinceLastActivity = Date.now() - lastActivityRef.current;
+      // Only keep updating if we have been active in the last 15 minutes
+      if (msSinceLastActivity < 15 * 60 * 1050) {
+        updatePresence(false);
+      }
+    }, 20000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [user]);
+
+  // Automated 30-minute inactivity session tracking
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
+    const onActivity = () => {
+      updateActivityTime();
+    };
+
+    events.forEach((eventName) => {
+      window.addEventListener(eventName, onActivity, { passive: true });
+    });
+
+    // Reset baseline timestamp upon user login
+    lastActivityRef.current = Date.now();
+
+    const checkInterval = setInterval(() => {
+      const msSinceLastActivity = Date.now() - lastActivityRef.current;
+      // 30 minutes in milliseconds = 30 * 60 * 1000 = 1,800,000 ms
+      if (msSinceLastActivity >= 30 * 60 * 1000) {
+        console.warn('Inactivity limit reached: logging out user...');
+        handleLogout();
+        setSessionExpiredMessage('Sua sessão foi encerrada automaticamente por inatividade nos últimos 30 minutos. Por favor, faça login novamente.');
+      }
+    }, 10000); // Check every 10 seconds
+
+    return () => {
+      events.forEach((eventName) => {
+        window.removeEventListener(eventName, onActivity);
+      });
+      clearInterval(checkInterval);
+    };
+  }, [user, updateActivityTime]);
 
   // Filter contracts for restricted client-level users
   const visibleContracts = useMemo(() => {
@@ -350,7 +470,15 @@ export default function App() {
 
   // Mandatory Authentication layer
   if (!user) {
-    return <AuthWindow onLoginSuccess={(session) => setUser(session)} />;
+    return (
+      <AuthWindow 
+        onLoginSuccess={(session) => {
+          setUser(session);
+          setSessionExpiredMessage('');
+        }} 
+        initialMessage={sessionExpiredMessage}
+      />
+    );
   }
 
   // Sidebar navigation links descriptor
@@ -1023,7 +1151,7 @@ export default function App() {
               )}
 
               {activeTab === 'usuarios' && user?.role === 'admin' && (
-                <UserManagement />
+                <UserManagement currentUser={user} />
               )}
               
               {activeTab === 'contact-center' && (

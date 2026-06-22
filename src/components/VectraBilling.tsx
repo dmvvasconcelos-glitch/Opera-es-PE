@@ -28,7 +28,7 @@ import {
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch, getDoc } from 'firebase/firestore';
 
 interface VectraOS {
   id: string;
@@ -86,6 +86,7 @@ export default function VectraBilling() {
   const [records, setRecords] = useState<VectraOS[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [activeSubTab, setActiveSubTab] = useState<'all' | 'wifi' | 'utm'>('all');
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   const [vectraPrices, setVectraPrices] = useState({
     limitWifi: 63,
@@ -224,10 +225,22 @@ export default function VectraBilling() {
           // Ignore if empty snapshot from local cache to prevent default overwrites during connection phase
           return;
         }
-        if (localStorage.getItem('vectra_seeded_v1') === 'true') {
+
+        let isAlreadySeededDB = false;
+        try {
+          const seedMetaDoc = await getDoc(doc(db, 'test', 'seeding_metadata'));
+          if (seedMetaDoc.exists() && seedMetaDoc.data()?.vectra === true) {
+            isAlreadySeededDB = true;
+          }
+        } catch (smErr) {
+          console.warn("Could not retrieve remote seeding metadata for Vectra:", smErr);
+        }
+
+        if (isAlreadySeededDB || localStorage.getItem('vectra_seeded_v1') === 'true') {
           console.log("Database cleared of Vectra records by preference, skipping automatic seeding.");
           setRecords([]);
           setIsLoading(false);
+          localStorage.setItem('vectra_seeded_v1', 'true');
           return;
         }
         // Seed the preselected mock entries to Firestore using writeBatch
@@ -238,6 +251,11 @@ export default function VectraBilling() {
             const docRef = doc(db, 'vectraRecords', item.id);
             batch.set(docRef, item);
           });
+          
+          // Save seeding indication to DB as well
+          const seedMetaRef = doc(db, 'test', 'seeding_metadata');
+          batch.set(seedMetaRef, { vectra: true }, { merge: true });
+
           await batch.commit();
           localStorage.setItem('vectra_seeded_v1', 'true');
         } catch (error) {
@@ -484,6 +502,26 @@ export default function VectraBilling() {
       .finally(() => {
         setIsLoading(false);
       });
+  };
+
+  const handleClearMonthRecords = async () => {
+    if (monthRecords.length === 0) return;
+    setIsLoading(true);
+    try {
+      const batch = writeBatch(db);
+      monthRecords.forEach((record) => {
+        batch.delete(doc(db, 'vectraRecords', record.id));
+      });
+      await batch.commit();
+      showToast(`Todos os chamados do mês ${referenceMonth} foram excluídos com sucesso!`, 'success');
+    } catch (e) {
+      console.error("Error clearing month records: ", e);
+      handleFirestoreError(e, OperationType.DELETE, `vectraRecords/clear-month-${referenceMonth}`);
+      showToast("Erro ao limpar dados do mês.", "error");
+    } finally {
+      setIsLoading(false);
+      setShowClearConfirm(false);
+    }
   };
 
   const formatBRL = (val: number) => {
@@ -778,7 +816,7 @@ export default function VectraBilling() {
                 type="button"
                 onClick={() => setOsToDelete(null)}
                 className="px-4 py-2 text-xs font-bold bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-655 dark:text-zinc-300 rounded-xl cursor-pointer transition-colors"
-              >
+               >
                 Cancelar
               </button>
               <button
@@ -787,6 +825,37 @@ export default function VectraBilling() {
                 className="px-5 py-2 text-xs font-black uppercase tracking-wider bg-[#B6202F] hover:bg-[#a01c29] text-white rounded-xl cursor-pointer transition-colors shadow-xs"
               >
                 Excluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal for clearing all month records */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/60 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3.5xl max-w-sm w-full p-6 shadow-2xl animate-slide-in">
+            <div className="flex items-center gap-3 text-rose-600 pb-3 border-b border-zinc-150 dark:border-zinc-800">
+              <Trash2 className="h-5 w-5" />
+              <h3 className="font-sans font-black text-sm text-zinc-900 dark:text-white uppercase tracking-wider">Limpar Mês</h3>
+            </div>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-4 leading-relaxed font-sans">
+              Você tem certeza que deseja realmente excluir **todos os {monthRecords.length} chamados** do mês de **{referenceMonth}** da Vectra? Esta ação é permanente e irreversível.
+            </p>
+            <div className="flex items-center justify-end gap-3 mt-6">
+              <button
+                type="button"
+                onClick={() => setShowClearConfirm(false)}
+                className="px-4 py-2 text-xs font-bold bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-655 dark:text-zinc-300 rounded-xl cursor-pointer transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleClearMonthRecords}
+                className="px-5 py-2 text-xs font-black uppercase tracking-wider bg-rose-600 hover:bg-rose-700 text-white rounded-xl cursor-pointer transition-colors shadow-xs"
+              >
+                Confirmar
               </button>
             </div>
           </div>
@@ -1244,37 +1313,51 @@ export default function VectraBilling() {
             </p>
           </div>
           
-          <div className="flex items-center bg-zinc-50 dark:bg-zinc-950 p-1 rounded-xl border border-zinc-200/80 dark:border-zinc-850/80">
-            <button
-              onClick={() => setActiveSubTab('all')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                activeSubTab === 'all' 
-                  ? 'bg-white dark:bg-zinc-900 text-[#B6202F] shadow-xs' 
-                  : 'text-zinc-450 hover:text-zinc-905 dark:hover:text-white'
-              }`}
-            >
-              Todos ({stats.totalCount})
-            </button>
-            <button
-              onClick={() => setActiveSubTab('wifi')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                activeSubTab === 'wifi' 
-                  ? 'bg-white dark:bg-zinc-900 text-[#B6202F] shadow-xs' 
-                  : 'text-zinc-450 hover:text-zinc-905 dark:hover:text-white'
-              }`}
-            >
-              Wifi ({stats.wifiCount})
-            </button>
-            <button
-              onClick={() => setActiveSubTab('utm')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                activeSubTab === 'utm' 
-                  ? 'bg-white dark:bg-zinc-900 text-[#B6202F] shadow-xs' 
-                  : 'text-zinc-450 hover:text-zinc-905 dark:hover:text-white'
-              }`}
-            >
-              UTM ({stats.utmCount})
-            </button>
+          <div className="flex items-center gap-3">
+            {monthRecords.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowClearConfirm(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/20 dark:hover:bg-rose-900/30 dark:text-rose-400 border border-rose-200/50 dark:border-rose-900/30 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                title={`Excluir todos os chamados de ${referenceMonth}`}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Limpar Mês</span>
+              </button>
+            )}
+
+            <div className="flex items-center bg-zinc-50 dark:bg-zinc-950 p-1 rounded-xl border border-zinc-200/80 dark:border-zinc-850/80">
+              <button
+                onClick={() => setActiveSubTab('all')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  activeSubTab === 'all' 
+                    ? 'bg-white dark:bg-zinc-900 text-[#B6202F] shadow-xs' 
+                    : 'text-zinc-450 hover:text-zinc-905 dark:hover:text-white'
+                }`}
+              >
+                Todos ({stats.totalCount})
+              </button>
+              <button
+                onClick={() => setActiveSubTab('wifi')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  activeSubTab === 'wifi' 
+                    ? 'bg-white dark:bg-zinc-900 text-[#B6202F] shadow-xs' 
+                    : 'text-zinc-450 hover:text-zinc-905 dark:hover:text-white'
+                }`}
+              >
+                Wifi ({stats.wifiCount})
+              </button>
+              <button
+                onClick={() => setActiveSubTab('utm')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  activeSubTab === 'utm' 
+                    ? 'bg-white dark:bg-zinc-900 text-[#B6202F] shadow-xs' 
+                    : 'text-zinc-450 hover:text-zinc-905 dark:hover:text-white'
+                }`}
+              >
+                UTM ({stats.utmCount})
+              </button>
+            </div>
           </div>
         </div>
 

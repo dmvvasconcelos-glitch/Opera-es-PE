@@ -33,7 +33,7 @@ export const DEFAULT_USERS = [
 
 export function getStoredSession(): UserSession | null {
   try {
-    const data = localStorage.getItem(SESSION_KEY);
+    const data = sessionStorage.getItem(SESSION_KEY);
     return data ? JSON.parse(data) : null;
   } catch {
     return null;
@@ -42,7 +42,7 @@ export function getStoredSession(): UserSession | null {
 
 export function saveSession(session: UserSession): void {
   try {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
   } catch (e) {
     console.error('Failed to save session:', e);
   }
@@ -50,7 +50,7 @@ export function saveSession(session: UserSession): void {
 
 export function clearSession(): void {
   try {
-    localStorage.removeItem(SESSION_KEY);
+    sessionStorage.removeItem(SESSION_KEY);
   } catch (e) {
     console.error('Failed to clear session:', e);
   }

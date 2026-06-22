@@ -25,7 +25,7 @@ import {
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, getDoc, writeBatch } from 'firebase/firestore';
 
 interface StarlinkOS {
   id: string;
@@ -151,17 +151,36 @@ export default function StarlinkBilling() {
           // Ignore if empty snapshot from local cache to prevent default overwrites during connection phase
           return;
         }
-        if (localStorage.getItem('starlink_seeded_v1') === 'true') {
+
+        let isAlreadySeededDB = false;
+        try {
+          const seedMetaDoc = await getDoc(doc(db, 'test', 'seeding_metadata'));
+          if (seedMetaDoc.exists() && seedMetaDoc.data()?.starlink === true) {
+            isAlreadySeededDB = true;
+          }
+        } catch (smErr) {
+          console.warn("Could not retrieve remote seeding metadata for Starlink:", smErr);
+        }
+
+        if (isAlreadySeededDB || localStorage.getItem('starlink_seeded_v1') === 'true') {
           console.log("Database cleared of Starlink records by preference, skipping automatic seeding.");
           setRecords([]);
           setIsLoading(false);
+          localStorage.setItem('starlink_seeded_v1', 'true');
           return;
         }
         // Seed the preseeded mock entries to Firestore if there is nothing in it yet
         try {
-          for (const item of PRESEEDED_STARLINK_RECORDS) {
-            await setDoc(doc(db, 'starlinkRecords', item.id), item);
-          }
+          const batch = writeBatch(db);
+          PRESEEDED_STARLINK_RECORDS.forEach((item) => {
+            batch.set(doc(db, 'starlinkRecords', item.id), item);
+          });
+          
+          // Save seeding indication to DB as well
+          const seedMetaRef = doc(db, 'test', 'seeding_metadata');
+          batch.set(seedMetaRef, { starlink: true }, { merge: true });
+
+          await batch.commit();
           localStorage.setItem('starlink_seeded_v1', 'true');
         } catch (error) {
           console.error("Error seeding Starlink records to Firestore:", error);

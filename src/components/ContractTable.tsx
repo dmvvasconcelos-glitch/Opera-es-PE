@@ -218,46 +218,7 @@ export default function ContractTable({
     return () => unsubscribe();
   }, []);
 
-  // One-time cleanup: deletes legacy/stale Firestore records for future months (Julho - Dezembro)
-  useEffect(() => {
-    const cleanFutureMonths = async () => {
-      try {
-        const clearedKey = 'pvf_future_months_cleared_v2';
-        if (localStorage.getItem(clearedKey) === 'true') {
-          return;
-        }
 
-        const q = collection(db, 'pvfMonthlyContracts');
-        const querySnapshot = await getDocs(q);
-        const futureMonths = [
-          'Julho/2026',
-          'Agosto/2026',
-          'Setembro/2026',
-          'Outubro/2026',
-          'Novembro/2026',
-          'Dezembro/2026'
-        ];
-
-        let deleteCount = 0;
-        for (const docSnap of querySnapshot.docs) {
-          const data = docSnap.data();
-          if (data && futureMonths.includes(data.referenceMonth)) {
-            await deleteDoc(doc(db, 'pvfMonthlyContracts', docSnap.id));
-            deleteCount++;
-          }
-        }
-
-        if (deleteCount > 0) {
-          console.log(`[Ponto de Voz Fixo] Cleaned up ${deleteCount} legacy items from future months.`);
-        }
-        localStorage.setItem(clearedKey, 'true');
-      } catch (err) {
-        console.error("Erro no cleanup de meses futuros:", err);
-      }
-    };
-
-    cleanFutureMonths();
-  }, [dbPvfRecords]);
 
   // Sync to local storage for offline support
   useEffect(() => {

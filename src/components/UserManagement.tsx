@@ -6,7 +6,8 @@
 import React, { useState, useEffect } from 'react';
 import { DEFAULT_USERS, getStoredSession } from '../auth-sim';
 import { db } from '../firebase';
-import { collection, doc, onSnapshot, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { UserSession } from '../types';
+import { collection, doc, onSnapshot, setDoc, deleteDoc, writeBatch, getDoc } from 'firebase/firestore';
 import { 
   Users, 
   UserPlus, 
@@ -35,6 +36,8 @@ interface UserItem {
   status?: 'Ativo' | 'Pendente';
   secretarias?: string[];
   isFirstAccess?: boolean;
+  lastLogin?: string;
+  lastActiveAt?: string;
 }
 
 const AVAILABLE_SECRETARIAS = [
@@ -52,7 +55,11 @@ const AVAILABLE_SECRETARIAS = [
   'SETUR - Secretaria de Turismo'
 ];
 
-export default function UserManagement() {
+interface UserManagementProps {
+  currentUser?: UserSession | null;
+}
+
+export default function UserManagement({ currentUser }: UserManagementProps = {}) {
   const [users, setUsers] = useState<UserItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -79,8 +86,26 @@ export default function UserManagement() {
   const [resetPasswordUser, setResetPasswordUser] = useState<UserItem | null>(null);
   const [provisionalPassword, setProvisionalPassword] = useState('');
 
-  const currentUserSession = getStoredSession();
+  const currentUserSession = currentUser || getStoredSession();
   const isCurrentUserAdmin = currentUserSession?.role === 'admin';
+
+  const isOnline = (item: UserItem) => {
+    if (currentUserSession && item.email.toLowerCase().trim() === currentUserSession.email.toLowerCase().trim()) {
+      return true;
+    }
+    if (item.lastActiveAt) {
+      try {
+        const diffMs = Date.now() - new Date(item.lastActiveAt).getTime();
+        // Return true if active in the last 10 minutes (widened threshold for safety)
+        if (diffMs >= 0 && diffMs < 10 * 60 * 1000) {
+          return true;
+        }
+      } catch (err) {
+        // Ignored
+      }
+    }
+    return false;
+  };
 
   const generateRandomPassword = () => {
     const randomNum = Math.floor(1000 + Math.random() * 9000);
@@ -101,9 +126,21 @@ export default function UserManagement() {
           // Ignore if empty snapshot from local cache to prevent default overwrites during connection phase
           return;
         }
-        if (localStorage.getItem('system_users_seeded') === 'true') {
+
+        let isAlreadySeededDB = false;
+        try {
+          const seedMetaDoc = await getDoc(doc(db, 'test', 'seeding_metadata'));
+          if (seedMetaDoc.exists() && seedMetaDoc.data()?.systemUsers === true) {
+            isAlreadySeededDB = true;
+          }
+        } catch (smErr) {
+          console.warn("Could not retrieve remote seeding metadata for Users:", smErr);
+        }
+
+        if (isAlreadySeededDB || localStorage.getItem('system_users_seeded') === 'true') {
           console.log("Database cleared of system users by preference, skipping automatic seeding.");
           setUsers([]);
+          localStorage.setItem('system_users_seeded', 'true');
           return;
         }
         console.log("Sem usuários cadastrados no Firestore, populando conjunto padrão...");
@@ -117,6 +154,11 @@ export default function UserManagement() {
               secretarias: (usr as any).secretarias || []
             });
           });
+
+          // Save seeding indication to DB as well
+          const seedMetaRef = doc(db, 'test', 'seeding_metadata');
+          batch.set(seedMetaRef, { systemUsers: true }, { merge: true });
+
           await batch.commit();
           localStorage.setItem('system_users_seeded', 'true');
         } catch (err) {
@@ -557,7 +599,7 @@ export default function UserManagement() {
             <thead>
               <tr className="bg-zinc-50/50 dark:bg-zinc-950/20 text-zinc-400 dark:text-zinc-500 text-[10px] font-bold uppercase tracking-widest border-b border-zinc-150 dark:border-zinc-800/80">
                 <th className="py-4 px-6 font-mono">Nome Completo / Órgão</th>
-                <th className="py-4 px-6 font-mono">E-mail Corporativo</th>
+                <th className="py-4 px-6 font-mono">Último Login</th>
                 <th className="py-4 px-6 font-mono">Nível de Acesso</th>
                 <th className="py-4 px-6 font-mono text-center">Status</th>
                 <th className="py-4 px-6 font-mono text-center">Permissão Ativa</th>
@@ -585,13 +627,44 @@ export default function UserManagement() {
                           <span className="font-semibold text-zinc-800 dark:text-zinc-150 text-xs transition-colors group-hover:text-brand dark:group-hover:text-brand-light">
                             {item.displayName}
                           </span>
+                          <span className="text-[11px] text-zinc-400 dark:text-zinc-500 font-mono flex items-center gap-1 mt-0.5 select-all">
+                            <Mail className="h-3 w-3 text-zinc-350 dark:text-zinc-650 shrink-0" />
+                            {item.email}
+                          </span>
                         </div>
                       </div>
                     </td>
 
-                    {/* Email */}
-                    <td className="py-4 px-6 font-mono text-zinc-500 dark:text-zinc-400 font-medium text-xs">
-                      {item.email}
+                    {/* Último Login */}
+                    <td className="py-4 px-6 text-xs">
+                      {isOnline(item) ? (
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="relative flex h-2 w-2 select-none">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                            </span>
+                            <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider leading-none font-mono">Online</span>
+                          </div>
+                          <span className="text-[10px] text-zinc-650 dark:text-zinc-300 font-bold font-mono whitespace-nowrap">
+                            {item.lastLogin || new Date().toLocaleString('pt-BR')}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500">
+                            <span className="h-2 w-2 rounded-full bg-zinc-300 dark:bg-zinc-700"></span>
+                            <span className="text-[10px] font-semibold uppercase tracking-wider leading-none font-mono">Offline</span>
+                          </div>
+                          {item.lastLogin ? (
+                            <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium font-mono whitespace-nowrap font-bold">
+                              {item.lastLogin}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-zinc-350 dark:text-zinc-650 italic font-mono whitespace-nowrap">Nunca logado</span>
+                          )}
+                        </div>
+                      )}
                     </td>
 
                     {/* Role selector directly */}
@@ -603,7 +676,7 @@ export default function UserManagement() {
                         </span>
                       ) : (
                         <div className="space-y-1.5">
-                          <div className="relative inline-block w-48">
+                          <div className="relative inline-block w-40">
                             <select
                               id={`select-role-${item.email}`}
                               value={item.role}

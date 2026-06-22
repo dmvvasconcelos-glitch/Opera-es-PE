@@ -25,9 +25,10 @@ import {
 
 interface AuthWindowProps {
   onLoginSuccess: (session: UserSession) => void;
+  initialMessage?: string;
 }
 
-export default function AuthWindow({ onLoginSuccess }: AuthWindowProps) {
+export default function AuthWindow({ onLoginSuccess, initialMessage }: AuthWindowProps) {
   const [isLoginView, setIsLoginView] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -41,6 +42,13 @@ export default function AuthWindow({ onLoginSuccess }: AuthWindowProps) {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [pendingSessionUser, setPendingSessionUser] = useState<any>(null);
+  const [infoMessage, setInfoMessage] = useState(initialMessage || '');
+
+  useEffect(() => {
+    if (initialMessage) {
+      setInfoMessage(initialMessage);
+    }
+  }, [initialMessage]);
 
   // Synchronize systemUsers initialization if not done yet
   useEffect(() => {
@@ -49,8 +57,19 @@ export default function AuthWindow({ onLoginSuccess }: AuthWindowProps) {
         const q = collection(db, 'systemUsers');
         const snapshot = await getDocs(q);
         if (snapshot.empty) {
-          if (localStorage.getItem('system_users_seeded') === 'true') {
+          let isAlreadySeededDB = false;
+          try {
+            const seedMetaDoc = await getDoc(doc(db, 'test', 'seeding_metadata'));
+            if (seedMetaDoc.exists() && seedMetaDoc.data()?.systemUsers === true) {
+              isAlreadySeededDB = true;
+            }
+          } catch (smErr) {
+            console.warn("Could not check remote seeding metadata in AuthWindow:", smErr);
+          }
+
+          if (isAlreadySeededDB || localStorage.getItem('system_users_seeded') === 'true') {
             console.log("Database cleared of system users, skipping auto-seed.");
+            localStorage.setItem('system_users_seeded', 'true');
             return;
           }
           console.log("Seeding systemUsers inside AuthWindow...");
@@ -63,6 +82,11 @@ export default function AuthWindow({ onLoginSuccess }: AuthWindowProps) {
               secretarias: (usr as any).secretarias || []
             });
           });
+
+          // Save seeding indication to DB as well
+          const seedMetaRef = doc(db, 'test', 'seeding_metadata');
+          batch.set(seedMetaRef, { systemUsers: true }, { merge: true });
+
           await batch.commit();
           localStorage.setItem('system_users_seeded', 'true');
         } else {
@@ -79,6 +103,7 @@ export default function AuthWindow({ onLoginSuccess }: AuthWindowProps) {
     e.preventDefault();
     setError('');
     setSuccess('');
+    setInfoMessage('');
 
     if (!email.trim() || !password.trim()) {
       setError('Por favor, preencha todos os campos obrigatórios.');
@@ -130,6 +155,17 @@ export default function AuthWindow({ onLoginSuccess }: AuthWindowProps) {
           setPassword('');
           setLoading(false);
           return;
+        }
+
+        // Save last login timestamp in Firestore
+        const nowStr = new Date().toLocaleString('pt-BR');
+        try {
+          await setDoc(doc(db, 'systemUsers', docId), {
+            ...matched,
+            lastLogin: nowStr
+          });
+        } catch (dbErr) {
+          console.warn("Failed to update lastLogin column in Firestore:", dbErr);
         }
 
         // Save and callback
@@ -243,7 +279,8 @@ export default function AuthWindow({ onLoginSuccess }: AuthWindowProps) {
       const updatedUser = {
         ...currentData,
         password: newPassword,
-        isFirstAccess: false
+        isFirstAccess: false,
+        lastLogin: new Date().toLocaleString('pt-BR')
       };
 
       await setDoc(userDocRef, updatedUser);
@@ -430,6 +467,15 @@ export default function AuthWindow({ onLoginSuccess }: AuthWindowProps) {
               {/* Form container */}
               <form onSubmit={handleAuthSubmit} className="space-y-4">
                 
+                {infoMessage && (
+                  <div className="p-3 bg-amber-50 dark:bg-amber-950/20 text-xs text-amber-700 dark:text-amber-400 rounded-xl flex items-start gap-2.5 border border-amber-250 dark:border-amber-900/40">
+                    <ShieldAlert className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                    <div className="flex-1 text-left leading-relaxed">
+                      <span>{infoMessage}</span>
+                    </div>
+                  </div>
+                )}
+
                 {error && (
                   <div className="p-3 bg-rose-50 dark:bg-rose-950/20 text-xs text-rose-600 dark:text-rose-400 rounded-xl flex items-center gap-2.5 border border-rose-100 dark:border-rose-900/30">
                     <ShieldAlert className="h-4 w-4 text-rose-500" />
