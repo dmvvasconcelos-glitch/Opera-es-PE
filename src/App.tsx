@@ -164,11 +164,11 @@ export default function App() {
 
         // Subscribe Real-time Prices
         unsubPrices = onSnapshot(doc(db, 'systemPrices', 'current'), async (docSnap) => {
-          if ((docSnap as any).metadata?.fromCache) {
-            // Ignore if metadata indicates it is only from the local cache
-            return;
-          }
           if (!docSnap.exists()) {
+            if ((docSnap as any).metadata?.fromCache) {
+              // Ignore if empty snapshot from local cache to prevent default overwrites during connection phase
+              return;
+            }
             console.log("Sem tabelas tarifárias no banco de dados, populando conjunto padrão...");
             try {
               await setDoc(doc(db, 'systemPrices', 'current'), INITIAL_PRICES);
