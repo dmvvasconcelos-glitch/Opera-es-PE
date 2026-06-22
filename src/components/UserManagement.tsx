@@ -97,6 +97,10 @@ export default function UserManagement() {
       });
 
       if (snapshot.empty) {
+        if (snapshot.metadata?.fromCache) {
+          // Ignore if empty snapshot from local cache to prevent default overwrites during connection phase
+          return;
+        }
         if (localStorage.getItem('system_users_seeded') === 'true') {
           console.log("Database cleared of system users by preference, skipping automatic seeding.");
           setUsers([]);

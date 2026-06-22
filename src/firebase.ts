@@ -4,6 +4,7 @@ import {
   initializeFirestore, 
   persistentLocalCache, 
   persistentMultipleTabManager,
+  memoryLocalCache,
   getFirestore,
   setLogLevel 
 } from 'firebase/firestore';
@@ -22,15 +23,29 @@ try {
 // Safely initialize Firestore with robust offline persistent cache
 let dbInstance;
 try {
-  dbInstance = initializeFirestore(app, {
-    localCache: persistentLocalCache({
-      tabManager: persistentMultipleTabManager()
-    })
-  }, firebaseConfig.firestoreDatabaseId);
-  console.info("Firestore initialized with multi-tab offline persistent cache.");
+  const isIframe = typeof window !== 'undefined' && window.self !== window.top;
+  if (isIframe) {
+    console.info("Firestore running inside an iframe (such as AI Studio preview mode). Enabling memoryLocalCache to bypass Chrome IndexedDB locking and caching lag.");
+    dbInstance = initializeFirestore(app, {
+      localCache: memoryLocalCache()
+    }, firebaseConfig.firestoreDatabaseId);
+  } else {
+    dbInstance = initializeFirestore(app, {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager()
+      })
+    }, firebaseConfig.firestoreDatabaseId);
+    console.info("Firestore initialized with multi-tab offline persistent cache.");
+  }
 } catch (error) {
-  console.warn("Persistent cache not supported. Cascading to memory cache/standard Firestore:", error);
-  dbInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+  console.warn("Persistent cache customization failed. Cascading to memory cache/standard Firestore:", error);
+  try {
+    dbInstance = initializeFirestore(app, {
+      localCache: memoryLocalCache()
+    }, firebaseConfig.firestoreDatabaseId);
+  } catch (err) {
+    dbInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+  }
 }
 
 export const db = dbInstance;

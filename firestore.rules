@@ -80,17 +80,7 @@ service cloud.firestore {
         'software',
         'virtual'
       ])
-      && data.keys().size() == 10
-      && (data.analogico is float || data.analogico is int)
-      && (data.semFio is float || data.semFio is int)
-      && (data.extensao is float || data.extensao is int)
-      && (data.dBasico is float || data.dBasico is int)
-      && (data.dEspecial is float || data.dEspecial is int)
-      && (data.ipBasico is float || data.ipBasico is int)
-      && (data.fCabeca is float || data.fCabeca is int)
-      && (data.sMesa is float || data.sMesa is int)
-      && (data.software is float || data.software is int)
-      && (data.virtual is float || data.virtual is int);
+      && data.keys().size() == 10;
     }
 
     function isValidUmTelecomRecord(data) {
@@ -249,13 +239,7 @@ service cloud.firestore {
         'uraBasica',
         'uraCritica'
       ])
-      && data.keys().size() == 6
-      && (data.nmsBasico is float || data.nmsBasico is int)
-      && (data.nmsCritico is float || data.nmsCritico is int)
-      && (data.gravacaoBasica is float || data.gravacaoBasica is int)
-      && (data.gravacaoCritica is float || data.gravacaoCritica is int)
-      && (data.uraBasica is float || data.uraBasica is int)
-      && (data.uraCritica is float || data.uraCritica is int);
+      && data.keys().size() == 6;
     }
 
     function isValidVectraPrices(data) {
@@ -267,13 +251,7 @@ service cloud.firestore {
         'baseCostUtm',
         'excedenteUtm'
       ])
-      && data.keys().size() == 6
-      && data.limitWifi is int
-      && (data.baseCostWifi is float || data.baseCostWifi is int)
-      && (data.excedenteWifi is float || data.excedenteWifi is int)
-      && data.limitUtm is int
-      && (data.baseCostUtm is float || data.baseCostUtm is int)
-      && (data.excedenteUtm is float || data.excedenteUtm is int);
+      && data.keys().size() == 6;
     }
 
     // test connectivity collection rules

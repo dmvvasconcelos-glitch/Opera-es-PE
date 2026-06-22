@@ -207,6 +207,10 @@ export default function ContactCenterBilling() {
         setPrices(fetchedPrices);
         setTempPrices(fetchedPrices);
       } else {
+        if ((docSnap as any).metadata?.fromCache) {
+          // Ignore if empty snapshot from local cache to prevent default overwrites during connection phase
+          return;
+        }
         // Initialize document with defaults
         try {
           await setDoc(pricesDocRef, DEFAULT_CC_PRICES);
@@ -250,6 +254,10 @@ export default function ContactCenterBilling() {
       };
 
       if (snapshot.empty) {
+        if (snapshot.metadata?.fromCache) {
+          // Ignore if empty snapshot from local cache to prevent default overwrites during connection phase
+          return;
+        }
         const isSeeded = localStorage.getItem('cc_seeded_v6') === 'true';
         if (isSeeded) {
           setRecords([]);

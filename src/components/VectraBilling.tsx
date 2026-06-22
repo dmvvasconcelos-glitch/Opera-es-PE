@@ -128,6 +128,10 @@ export default function VectraBilling() {
           excedenteUtm: Number(data.excedenteUtm ?? 0.0)
         });
       } else {
+        if ((docSnap as any).metadata?.fromCache) {
+          // Ignore if empty snapshot from local cache to prevent default overwrites during connection phase
+          return;
+        }
         const defaultZero = {
           limitWifi: 63,
           baseCostWifi: 0.0,
@@ -216,6 +220,10 @@ export default function VectraBilling() {
       });
 
       if (snapshot.empty) {
+        if (snapshot.metadata?.fromCache) {
+          // Ignore if empty snapshot from local cache to prevent default overwrites during connection phase
+          return;
+        }
         if (localStorage.getItem('vectra_seeded_v1') === 'true') {
           console.log("Database cleared of Vectra records by preference, skipping automatic seeding.");
           setRecords([]);

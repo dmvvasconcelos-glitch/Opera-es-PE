@@ -170,6 +170,10 @@ export default function UmTelecomBilling() {
       });
 
       if (snapshot.empty) {
+        if (snapshot.metadata?.fromCache) {
+          // Ignore if empty snapshot from local cache to prevent default overwrites during connection phase
+          return;
+        }
         if (localStorage.getItem('umtelecom_seeded_v1') === 'true') {
           console.log("Database cleared of Um Telecom records by preference, skipping automatic seeding.");
           setDbRecords([]);

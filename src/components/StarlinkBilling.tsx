@@ -147,6 +147,10 @@ export default function StarlinkBilling() {
       });
 
       if (snapshot.empty) {
+        if (snapshot.metadata?.fromCache) {
+          // Ignore if empty snapshot from local cache to prevent default overwrites during connection phase
+          return;
+        }
         if (localStorage.getItem('starlink_seeded_v1') === 'true') {
           console.log("Database cleared of Starlink records by preference, skipping automatic seeding.");
           setRecords([]);
