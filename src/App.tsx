@@ -185,23 +185,30 @@ export default function App() {
           }
         });
 
-        // Subscribe Real-time Prices
-        unsubPrices = onSnapshot(doc(db, 'systemPrices', 'current'), async (docSnap) => {
-          if (!docSnap.exists()) {
-            if ((docSnap as any).metadata?.fromCache) {
-              // Ignore if empty snapshot from local cache to prevent default overwrites during connection phase
-              return;
-            }
-            console.log("Sem tabelas tarifárias no banco de dados, populando conjunto padrão...");
+        // Pre-verify and seed system prices safely if absolutely missing from database (online/getDoc check)
+        const pricesDocRef = doc(db, 'systemPrices', 'current');
+        getDoc(pricesDocRef).then(async (docSnap) => {
+          if (!docSnap.exists() && isActive) {
+            console.log("Sem tabelas tarifárias no banco de dados (verificado via getDoc), populando conjunto padrão...");
             try {
-              await setDoc(doc(db, 'systemPrices', 'current'), INITIAL_PRICES);
+              await setDoc(pricesDocRef, INITIAL_PRICES);
             } catch (writeErr) {
-              console.error("Falha ao salvar tarifas padrão no Firestore:", writeErr);
+              console.error("Falha ao salvar tarifas padrão no Firestore via getDoc:", writeErr);
             }
+          }
+        }).catch((err) => {
+          console.warn("Erro ao ler tarifas atuais no pre-check getDoc:", err);
+        });
+
+        // Subscribe Real-time Prices
+        unsubPrices = onSnapshot(pricesDocRef, (docSnap) => {
+          if (!docSnap.exists()) {
             return;
           }
           if (isActive) {
-            setPrices(docSnap.data() as PvfPrices);
+            const data = docSnap.data() as PvfPrices;
+            setPrices(data);
+            localStorage.setItem('portal_gestao_prices', JSON.stringify(data));
           }
         }, (error) => {
           console.error("Erro na leitura das tarifas, usando local de fallback:", error);
