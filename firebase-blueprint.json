@@ -215,6 +215,87 @@
       "required": [
         "nmsBasico", "nmsCritico", "gravacaoBasica", "gravacaoCritica", "uraBasica", "uraCritica"
       ]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "Represents a supplier in the system.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nome": { "type": "string" },
+        "contato": { "type": "string" },
+        "cpf": { "type": "string" },
+        "cnpj": { "type": "string" },
+        "endereco": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "areasAtuacao": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Selected areas of operation, e.g. RMR, Interior, Noronha"
+        }
+      },
+      "required": ["id", "nome"]
+    },
+    "LpuItem": {
+      "title": "LpuItem",
+      "description": "Represents a service activity and price in the LPU table.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "atividade": { "type": "string" },
+        "valor": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "area": {
+          "type": "string",
+          "enum": ["RMR", "Interior", "Noronha"],
+          "description": "Area represented by this LPU item"
+        }
+      },
+      "required": ["id", "atividade", "valor"]
+    },
+    "LpuSettings": {
+      "title": "LpuSettings",
+      "description": "Represents global LPU settings like Valor Quilometragem and Raio Quilometragem.",
+      "type": "object",
+      "properties": {
+        "valorQuilometragem": { "type": "string" },
+        "raioQuilometragem": { "type": "string" }
+      },
+      "required": ["valorQuilometragem", "raioQuilometragem"]
+    },
+    "OperationalActivity": {
+      "title": "OperationalActivity",
+      "description": "Represents an individual partner field operational activity (O.S).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "site": { "type": "string" },
+        "data": { "type": "string" },
+        "estado": { "type": "string" },
+        "cidade": { "type": "string" },
+        "origem": { "type": "string" },
+        "destino": { "type": "string" },
+        "atividadeLpuId": { "type": "string" },
+        "atividadeLpuNome": { "type": "string" },
+        "material": { "type": "string" },
+        "kmTotal": { "type": "number" },
+        "valorKm": { "type": "number" },
+        "valorMaterial": { "type": "number" },
+        "valorAtividade": { "type": "number" },
+        "valorTotal": { "type": "number" },
+        "parceiroId": { "type": "string" },
+        "parceiroNome": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "images": { "type": "array", "items": { "type": "string" } },
+        "observacao": { "type": "string", "description": "Optional observation or technical notes about the activity" },
+        "status": { "type": "string", "enum": ["pendente", "validada"], "description": "Validation status of the activity" },
+        "createdBy": { "type": "string", "description": "User email or identifier of who registered the activity" }
+      },
+      "required": [
+        "id", "site", "data", "estado", "cidade", "origem", "destino",
+        "atividadeLpuId", "atividadeLpuNome", "kmTotal", "valorKm",
+        "valorMaterial", "valorAtividade", "valorTotal", "parceiroId", "parceiroNome"
+      ]
     }
   },
   "firestore": {
@@ -249,6 +330,22 @@
     "/contactCenterRecords/{recordId}": {
       "schema": "ContactCenterRecord",
       "description": "Collection storing Contact Center virtual/on-premise queue systems, SMS queues, recording nodes, and contract setups."
+    },
+    "/suppliers/{supplierId}": {
+      "schema": "Supplier",
+      "description": "Collection storing suppliers."
+    },
+    "/lpuItems/{itemId}": {
+      "schema": "LpuItem",
+      "description": "Collection storing LPU service items."
+    },
+    "/lpuSettings/{settingId}": {
+      "schema": "LpuSettings",
+      "description": "Collection storing fixed/pinned settings for LPU."
+    },
+    "/operationalActivities/{activityId}": {
+      "schema": "OperationalActivity",
+      "description": "Collection storing partner field operational activities (O.Ss) and automated faturamento details."
     }
   }
 }

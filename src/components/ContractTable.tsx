@@ -232,7 +232,11 @@ export default function ContractTable({
     if (isZeroMonthSelected) return [];
     
     // Filter records in collection for the current selected referenceMonth
-    const monthFiltered = dbPvfRecords.filter(r => r.referenceMonth === referenceMonth);
+    let monthFiltered = dbPvfRecords.filter(r => r.referenceMonth === referenceMonth);
+    if (user && user.role === 'cliente') {
+      const allowed = user.secretarias || [];
+      monthFiltered = monthFiltered.filter(r => allowed.includes(r.secretaria));
+    }
     
     const isFutureMonth = [
       'Julho/2026',
@@ -258,10 +262,19 @@ export default function ContractTable({
 
     // Also include any newly created contracts in this month that don't exist in base contracts list
     const existingIds = new Set(contracts.map(c => c.id));
-    const newCustomContracts = monthFiltered.filter(r => !existingIds.has(r.id));
+    let newCustomContracts = monthFiltered.filter(r => !existingIds.has(r.id));
+    if (user && user.role === 'cliente') {
+      const allowed = user.secretarias || [];
+      newCustomContracts = newCustomContracts.filter(r => allowed.includes(r.secretaria));
+    }
 
-    return [...merged, ...newCustomContracts];
-  }, [dbPvfRecords, contracts, referenceMonth, isZeroMonthSelected]);
+    const result = [...merged, ...newCustomContracts];
+    if (user && user.role === 'cliente') {
+      const allowed = user.secretarias || [];
+      return result.filter(r => allowed.includes(r.secretaria));
+    }
+    return result;
+  }, [dbPvfRecords, contracts, referenceMonth, isZeroMonthSelected, user]);
 
   // Current PVF statistics for selected month
   const currentBillingVal = useMemo(() => {
@@ -293,7 +306,11 @@ export default function ContractTable({
     if (!previousMonthStr) return [];
     if (previousMonthStr === 'Janeiro/2026' || previousMonthStr === 'Fevereiro/2026') return [];
 
-    const monthFiltered = dbPvfRecords.filter(r => r.referenceMonth === previousMonthStr);
+    let monthFiltered = dbPvfRecords.filter(r => r.referenceMonth === previousMonthStr);
+    if (user && user.role === 'cliente') {
+      const allowed = user.secretarias || [];
+      monthFiltered = monthFiltered.filter(r => allowed.includes(r.secretaria));
+    }
     
     // Merge base contracts with customized variables from Firestore for the previous month
     const merged = contracts.map(c => {
@@ -306,10 +323,19 @@ export default function ContractTable({
 
     // Also include newly created contracts
     const existingIds = new Set(contracts.map(c => c.id));
-    const newCustomContracts = monthFiltered.filter(r => !existingIds.has(r.id));
+    let newCustomContracts = monthFiltered.filter(r => !existingIds.has(r.id));
+    if (user && user.role === 'cliente') {
+      const allowed = user.secretarias || [];
+      newCustomContracts = newCustomContracts.filter(r => allowed.includes(r.secretaria));
+    }
 
-    return [...merged, ...newCustomContracts];
-  }, [dbPvfRecords, contracts, previousMonthStr]);
+    const result = [...merged, ...newCustomContracts];
+    if (user && user.role === 'cliente') {
+      const allowed = user.secretarias || [];
+      return result.filter(r => allowed.includes(r.secretaria));
+    }
+    return result;
+  }, [dbPvfRecords, contracts, previousMonthStr, user]);
 
   const findMatchingPvfPrevContract = (currentContract: Contract) => {
     if (!previousMonthContracts || previousMonthContracts.length === 0) return null;
@@ -1226,7 +1252,8 @@ export default function ContractTable({
       doc.setFontSize(9);
       doc.setTextColor(180, 220, 220);
       doc.text('PECONECTADO II', 15, 26);
-      doc.text(`Criação da Memória: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`, 15, 32);
+      doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`, 15, 32);
+      doc.text(`Mês de Referência: ${contract.referenceMonth || referenceMonth}`, 15, 38);
       
       // Grand Total faturamento box in header
       const totalVal = getContractValue(contract, prices);

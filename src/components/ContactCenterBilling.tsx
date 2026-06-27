@@ -7,6 +7,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { jsPDF } from 'jspdf';
 import * as XLSX from 'xlsx';
 import { db, handleFirestoreError, OperationType } from '../firebase';
+import { UserSession } from '../types';
 import { 
   collection, 
   doc, 
@@ -146,7 +147,13 @@ const PRESEEDED_CONTACT_CENTER: ContactCenterOS[] = [
   }
 ];
 
-export default function ContactCenterBilling() {
+interface ContactCenterBillingProps {
+  user?: UserSession | null;
+}
+
+export default function ContactCenterBilling({ user }: ContactCenterBillingProps = {}) {
+  const canModify = user && (user.role === 'admin' || user.role === 'editor');
+
   // Page Core State
   const [records, setRecords] = useState<ContactCenterOS[]>([]);
   const [prices, setPrices] = useState<ContactCenterPrices>(DEFAULT_CC_PRICES);
@@ -417,8 +424,13 @@ export default function ContactCenterBilling() {
   // Active records for currently selected month
   const monthRecords = useMemo(() => {
     if (isZeroMonthSelected) return [];
-    return records.filter(r => r.referenceMonth === referenceMonth);
-  }, [records, referenceMonth, isZeroMonthSelected]);
+    const baseRecords = records.filter(r => r.referenceMonth === referenceMonth);
+    if (user && user.role === 'cliente') {
+      const allowed = user.secretarias || [];
+      return baseRecords.filter(r => allowed.includes(r.secretaria));
+    }
+    return baseRecords;
+  }, [records, referenceMonth, isZeroMonthSelected, user]);
 
   // Previous month records for comparison
   const previousMonthStr = useMemo(() => {
@@ -429,8 +441,13 @@ export default function ContactCenterBilling() {
   const previousMonthRecords = useMemo(() => {
     if (!previousMonthStr) return [];
     if (previousMonthStr === 'Janeiro/2026' || previousMonthStr === 'Fevereiro/2026') return [];
-    return records.filter(r => r.referenceMonth === previousMonthStr);
-  }, [records, previousMonthStr]);
+    const baseRecords = records.filter(r => r.referenceMonth === previousMonthStr);
+    if (user && user.role === 'cliente') {
+      const allowed = user.secretarias || [];
+      return baseRecords.filter(r => allowed.includes(r.secretaria));
+    }
+    return baseRecords;
+  }, [records, previousMonthStr, user]);
 
   const findMatchingCcPrevRecord = (currentRecord: ContactCenterOS) => {
     if (!previousMonthRecords || previousMonthRecords.length === 0) return null;
@@ -445,11 +462,16 @@ export default function ContactCenterBilling() {
   // Unique lists of secretarias for filter select
   const uniqueSecretariasList = useMemo(() => {
     const set = new Set<string>();
-    records.forEach(r => {
+    let baseRecords = records;
+    if (user && user.role === 'cliente') {
+      const allowed = user.secretarias || [];
+      baseRecords = baseRecords.filter(r => allowed.includes(r.secretaria));
+    }
+    baseRecords.forEach(r => {
       if (r.secretaria) set.add(r.secretaria);
     });
     return Array.from(set).sort();
-  }, [records]);
+  }, [records, user]);
 
   // Apply search & advanced selectors
   const filteredRecords = useMemo(() => {
@@ -1340,34 +1362,36 @@ export default function ContactCenterBilling() {
           </div>
 
           {/* Action buttons list */}
-          <div className="flex items-center gap-2.5 self-end lg:self-auto flex-wrap">
-            {/* Replicar Mês button */}
-            <button
-              onClick={() => {
-                const idx = availableMonths.indexOf(referenceMonth);
-                if (idx > 0) {
-                  setReplicateSourceMonth(availableMonths[idx - 1]);
-                } else {
-                  setReplicateSourceMonth('Maio/2026');
-                }
-                setReplicateTargetMonth(referenceMonth);
-                setShowReplicateModal(true);
-              }}
-              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl text-xs font-extrabold shadow-md transition-all cursor-pointer whitespace-nowrap font-sans"
-            >
-              <Layers className="h-4 w-4 text-white" />
-              <span>Replicar Mês</span>
-            </button>
+          {canModify && (
+            <div className="flex items-center gap-2.5 self-end lg:self-auto flex-wrap">
+              {/* Replicar Mês button */}
+              <button
+                onClick={() => {
+                  const idx = availableMonths.indexOf(referenceMonth);
+                  if (idx > 0) {
+                    setReplicateSourceMonth(availableMonths[idx - 1]);
+                  } else {
+                    setReplicateSourceMonth('Maio/2026');
+                  }
+                  setReplicateTargetMonth(referenceMonth);
+                  setShowReplicateModal(true);
+                }}
+                className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl text-xs font-extrabold shadow-md transition-all cursor-pointer whitespace-nowrap font-sans"
+              >
+                <Layers className="h-4 w-4 text-white" />
+                <span>Replicar Mês</span>
+              </button>
 
-            {/* Cadastrar button */}
-            <button
-              onClick={handleOpenAddModal}
-              className="flex items-center gap-1.5 bg-brand hover:bg-brand-medium text-white px-4 py-2.5 rounded-xl text-xs font-extrabold shadow-md transition-all cursor-pointer whitespace-nowrap font-sans"
-            >
-              <Plus className="h-4 w-4 text-white" />
-              <span>Adicionar Contrato</span>
-            </button>
-          </div>
+              {/* Cadastrar button */}
+              <button
+                onClick={handleOpenAddModal}
+                className="flex items-center gap-1.5 bg-brand hover:bg-brand-medium text-white px-4 py-2.5 rounded-xl text-xs font-extrabold shadow-md transition-all cursor-pointer whitespace-nowrap font-sans"
+              >
+                <Plus className="h-4 w-4 text-white" />
+                <span>Adicionar Contrato</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1400,7 +1424,9 @@ export default function ContactCenterBilling() {
 
                 {/* Totals & Actions */}
                 <th className="py-3 px-4 font-black text-[11px] text-brand uppercase tracking-wider font-mono text-right pr-5 border-l border-brand/20">Valor Mensal Total</th>
-                <th className="py-3 px-4 font-black text-[11px] text-zinc-700 dark:text-zinc-300 uppercase tracking-wider font-mono text-center">Ações</th>
+                <th className="py-3 px-4 font-black text-[11px] text-zinc-700 dark:text-zinc-300 uppercase tracking-wider font-mono text-center">
+                  {canModify ? 'Ações' : 'Acesso'}
+                </th>
               </tr>
             </thead>
 
@@ -1542,7 +1568,7 @@ export default function ContactCenterBilling() {
                         <X className="h-3 w-3" />
                       </button>
                     </div>
-                  ) : (
+                  ) : canModify ? (
                     <button
                       onClick={() => setIsEditingPrices(true)}
                       className="inline-flex items-center gap-1 mx-auto text-[10px] px-2 py-1 bg-white hover:bg-sky-50 dark:bg-zinc-800 border border-sky-300 dark:border-zinc-700 text-sky-700 dark:text-sky-400 font-bold rounded-lg shadow-2xs transition-all pointer cursor-pointer"
@@ -1550,6 +1576,11 @@ export default function ContactCenterBilling() {
                       <Settings className="h-3 w-3" />
                       <span>Alterar Tarifas</span>
                     </button>
+                  ) : (
+                    <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-bold uppercase font-mono tracking-wider flex items-center justify-center gap-1 select-none">
+                      <ShieldCheck className="h-3 w-3 text-brand-medium" />
+                      Leitura
+                    </span>
                   )}
                 </td>
               </tr>
@@ -1770,22 +1801,32 @@ export default function ContactCenterBilling() {
 
                       {/* Actions */}
                       <td className="py-2 px-4 text-center">
-                        <div className="flex items-center justify-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                        {canModify ? (
+                          <div className="flex items-center justify-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={() => handleOpenEditModal(r)}
+                              title="Editar O.S."
+                              className="p-1 cursor-pointer hover:bg-zinc-150 dark:hover:bg-zinc-800 rounded-lg text-emerald-600 transition-colors"
+                            >
+                              <Edit2 className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => setRecordToDelete(r)}
+                              title="Deletar Contrato"
+                              className="p-1 cursor-pointer hover:bg-zinc-150 dark:hover:bg-zinc-800 rounded-lg text-rose-500 transition-colors"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ) : (
                           <button
-                            onClick={() => handleOpenEditModal(r)}
-                            title="Editar O.S."
-                            className="p-1 cursor-pointer hover:bg-zinc-150 dark:hover:bg-zinc-800 rounded-lg text-emerald-600 transition-colors"
+                            onClick={() => setSelectedRowId(isSelected ? null : r.id)}
+                            title="Visualizar Detalhes"
+                            className="p-1 mx-auto text-zinc-400 hover:text-brand-medium rounded-lg transition-colors cursor-pointer flex items-center justify-center"
                           >
-                            <Edit2 className="h-3.5 w-3.5" />
+                            <Eye className="h-3.5 w-3.5" />
                           </button>
-                          <button
-                            onClick={() => setRecordToDelete(r)}
-                            title="Deletar Contrato"
-                            className="p-1 cursor-pointer hover:bg-zinc-150 dark:hover:bg-zinc-800 rounded-lg text-rose-500 transition-colors"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
+                        )}
                       </td>
                     </tr>
                   );

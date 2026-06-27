@@ -355,6 +355,45 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
     };
   });
 
+  const [dbActivities, setDbActivities] = useState<any[]>(() => {
+    try {
+      const cached = localStorage.getItem('dashboard_activities_cache');
+      if (cached) return JSON.parse(cached);
+    } catch (e) {}
+    return [];
+  });
+
+  const getReferenceMonthFromDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    const parts = dateStr.split('-');
+    if (parts.length < 2) return '';
+    const year = parts[0];
+    const monthInt = parseInt(parts[1], 10);
+    const monthNames = [
+      'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+    ];
+    if (monthInt >= 1 && monthInt <= 12) {
+      return `${monthNames[monthInt - 1]}/${year}`;
+    }
+    return '';
+  };
+
+  // Sync operational activities in real-time
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'operationalActivities'), (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setDbActivities(list);
+      localStorage.setItem('dashboard_activities_cache', JSON.stringify(list));
+    }, (err) => {
+      console.error("Erro ao sincronizar atividades no dashboard:", err);
+    });
+    return () => unsub();
+  }, []);
+
   // Firestore sync for pvfMonthlyContracts in Dashboard
   useEffect(() => {
     const q = collection(db, 'pvfMonthlyContracts');
@@ -448,6 +487,129 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
 
     return [...merged, ...newCustomContracts];
   }, [dbPvfRecords, contracts, referenceMonth, isZeroMonthSelected]);
+
+  const activitiesForMonth = useMemo(() => {
+    return dbActivities.filter(act => {
+      if (act.data) {
+        const actMonth = getReferenceMonthFromDate(act.data);
+        return actMonth === referenceMonth;
+      }
+      return false;
+    });
+  }, [dbActivities, referenceMonth]);
+
+  const activitiesStats = useMemo(() => {
+    let totalLpu = 0;
+    let totalKm = 0;
+    let totalMaterial = 0;
+    let totalCost = 0;
+    
+    const partnerCostsMap: Record<string, { name: string; total: number; lpu: number; km: number; mat: number; count: number }> = {};
+    
+    activitiesForMonth.forEach(act => {
+      const lpuVal = Number(act.valorAtividade || 0);
+      const kmVal = Number(act.valorKm || 0);
+      const matVal = Number(act.valorMaterial || 0);
+      const totVal = Number(act.valorTotal || 0);
+      
+      totalLpu += lpuVal;
+      totalKm += kmVal;
+      totalMaterial += matVal;
+      totalCost += totVal;
+      
+      const pId = act.parceiroId || 'unknown';
+      const pName = act.parceiroNome || 'Outro';
+      
+      if (!partnerCostsMap[pId]) {
+        partnerCostsMap[pId] = { name: pName, total: 0, lpu: 0, km: 0, mat: 0, count: 0 };
+      }
+      partnerCostsMap[pId].total += totVal;
+      partnerCostsMap[pId].lpu += lpuVal;
+      partnerCostsMap[pId].km += kmVal;
+      partnerCostsMap[pId].mat += matVal;
+      partnerCostsMap[pId].count += 1;
+    });
+    
+    const partnerCosts = Object.values(partnerCostsMap).sort((a, b) => b.total - a.total);
+    
+    return {
+      totalLpu,
+      totalKm,
+      totalMaterial,
+      totalCost,
+      partnerCosts,
+      count: activitiesForMonth.length
+    };
+  }, [activitiesForMonth]);
+
+  const statsPanelContent = useMemo(() => {
+    if (activitiesStats.totalCost === 0) {
+      return (
+        <div className="text-center py-4">
+          <AlertCircle className="h-8 w-8 text-zinc-600 mx-auto mb-2" />
+          <span className="text-[10px] text-zinc-500 font-bold uppercase">Sem registros</span>
+        </div>
+      );
+    }
+    
+    return (
+      <>
+        <span className="text-[9px] text-zinc-500 font-extrabold uppercase tracking-widest font-mono">Breakdown de Custos</span>
+        <div className="space-y-1.5 mt-2.5">
+          <div className="flex items-center justify-between text-[11px] font-mono">
+            <span className="flex items-center gap-1.5 text-zinc-400">
+              <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+              Mão de Obra (LPU):
+            </span>
+            <span className="font-bold text-white">{(activitiesStats.totalLpu / (activitiesStats.totalCost || 1) * 100).toFixed(1)}%</span>
+          </div>
+          <div className="flex items-center justify-between text-[11px] font-mono">
+            <span className="flex items-center gap-1.5 text-zinc-400">
+              <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+              Deslocamento (KM):
+            </span>
+            <span className="font-bold text-white">{(activitiesStats.totalKm / (activitiesStats.totalCost || 1) * 100).toFixed(1)}%</span>
+          </div>
+          <div className="flex items-center justify-between text-[11px] font-mono">
+            <span className="flex items-center gap-1.5 text-zinc-400">
+              <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
+              Materiais Reembolsados:
+            </span>
+            <span className="font-bold text-white">{(activitiesStats.totalMaterial / (activitiesStats.totalCost || 1) * 100).toFixed(1)}%</span>
+          </div>
+          <div className="border-t border-white/5 pt-1.5 mt-1.5 flex items-center justify-between text-[10px] font-mono text-zinc-500">
+            <span>Total de Atividades:</span>
+            <span className="font-bold text-zinc-300">{activitiesStats.count}</span>
+          </div>
+        </div>
+      </>
+    );
+  }, [activitiesStats]);
+
+  const statsPanelBottomContent = useMemo(() => {
+    if (activitiesStats.totalCost === 0) {
+      return (
+        <div className="w-full bg-zinc-850 h-3 rounded-full flex items-center justify-center border border-zinc-800">
+          <span className="text-[9px] font-mono text-zinc-600">SEM ATIVIDADES REGISTRADAS NO PERÍODO</span>
+        </div>
+      );
+    }
+    
+    return (
+      <div className="space-y-3">
+        <div className="w-full bg-zinc-800 h-3 rounded-full flex overflow-hidden shadow-inner border border-zinc-800">
+          <div style={{ width: `${(activitiesStats.totalLpu / (activitiesStats.totalCost || 1)) * 100}%` }} className="bg-blue-500 h-full transition-all duration-500 hover:opacity-90" title={`LPU: R$ ${activitiesStats.totalLpu.toFixed(2)}`} />
+          <div style={{ width: `${(activitiesStats.totalKm / (activitiesStats.totalCost || 1)) * 100}%` }} className="bg-amber-500 h-full transition-all duration-500 hover:opacity-90" title={`KM: R$ ${activitiesStats.totalKm.toFixed(2)}`} />
+          <div style={{ width: `${(activitiesStats.totalMaterial / (activitiesStats.totalCost || 1)) * 100}%` }} className="bg-rose-500 h-full transition-all duration-500 hover:opacity-90" title={`Materiais: R$ ${activitiesStats.totalMaterial.toFixed(2)}`} />
+        </div>
+        <div className="flex justify-between items-center text-[10px] text-zinc-500 font-mono">
+          <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-500" /> R$ {activitiesStats.totalLpu.toLocaleString('pt-BR', { maximumFractionDigits: 0 })} LPU</span>
+          <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> R$ {activitiesStats.totalKm.toLocaleString('pt-BR', { maximumFractionDigits: 0 })} KM</span>
+          <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-rose-500" /> R$ {activitiesStats.totalMaterial.toLocaleString('pt-BR', { maximumFractionDigits: 0 })} Mat</span>
+        </div>
+      </div>
+    );
+  }, [activitiesStats]);
 
   // Responsive screen size listener for charts layout safety
   const [isMobile, setIsMobile] = useState(false);
@@ -1427,79 +1589,131 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
         </div>
       </div>
 
-      {/* 1. TOPMOST GENERAL TOTAL BILLING CARD */}
-      <div className="bg-gradient-to-br from-zinc-950 to-zinc-900 dark:from-zinc-900 dark:to-zinc-950 p-6 sm:p-8 rounded-3xl text-white shadow-xl border border-zinc-800 relative overflow-hidden group">
-        <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none group-hover:scale-110 transition-transform duration-500">
-          <Award className="h-28 w-28 text-white" />
-        </div>
+      {/* 1. TOPMOST CONSOLIDATED CARDS (REVENUE & COST) */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-3">
-            <div className="inline-flex items-center gap-1.5 bg-white/10 text-brand-light px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase tracking-widest border border-white/20">
-              <Percent className="h-3.5 w-3.5" />
-              <span>Receita Consolidada Geral ({referenceMonth})</span>
+        {/* 1.A RECEITA CONSOLIDADA GERAL CARD */}
+        <div className="bg-gradient-to-br from-zinc-950 to-zinc-900 dark:from-zinc-900 dark:to-zinc-950 p-6 sm:p-8 rounded-3xl text-white shadow-xl border border-zinc-800 relative overflow-hidden group flex flex-col justify-between">
+          <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none group-hover:scale-110 transition-transform duration-500">
+            <Award className="h-28 w-28 text-white" />
+          </div>
+          
+          <div className="relative z-10 space-y-4 w-full">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3">
+              <div className="inline-flex items-center gap-1.5 bg-white/10 text-brand-light px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase tracking-widest border border-white/20">
+                <Percent className="h-3.5 w-3.5" />
+                <span>Receita Consolidada Geral ({referenceMonth})</span>
+              </div>
             </div>
             
-            <h1 className="text-3xl sm:text-4.5xl font-black font-sans leading-none tracking-tight flex items-baseline gap-1.5">
-              <span className="text-xl sm:text-2xl font-normal text-zinc-400">R$</span>
-              <span className="font-mono text-white tracking-tighter sm:text-5xl">{grandTotalAll.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-            </h1>
-            
-            <p className="text-xs text-zinc-400 max-w-2xl font-medium leading-relaxed">
-              Consolidação integrada de faturamento englobando os faturamentos de <span className="text-white font-bold">Ponto de Voz Fixo (PVF)</span>, franquias e excedentes de chamados da <span className="text-white font-bold">Um Telecom</span>, <span className="text-white font-bold">Vectra</span>, faturamentos sob demanda de <span className="text-white font-bold">Starlink UT</span>, e <span className="text-white font-bold">Contact Center</span>.
-            </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+              <div className="space-y-2">
+                <h1 className="text-2xl sm:text-3.5xl font-black font-sans leading-none tracking-tight flex items-baseline gap-1.5">
+                  <span className="text-lg sm:text-xl font-normal text-zinc-400">R$</span>
+                  <span className="font-mono text-white tracking-tighter sm:text-4xl">{grandTotalAll.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </h1>
+                
+                <p className="text-xs text-zinc-400 max-w-md font-medium leading-relaxed">
+                  Consolidação integrada de faturamento.
+                </p>
+              </div>
+
+              <div className="bg-zinc-900/65 dark:bg-zinc-950/65 rounded-2xl p-4 border border-zinc-800/80 shrink-0 min-w-[245px] flex flex-col justify-center">
+                <span className="text-[9px] text-zinc-500 font-extrabold uppercase tracking-widest font-mono">Fatias de Participação</span>
+                <div className="space-y-1.5 mt-2.5">
+                  <div className="flex items-center justify-between text-[11px] font-mono">
+                    <span className="flex items-center gap-1.5 text-zinc-400">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                      PVF (Fixo):
+                    </span>
+                    <span className="font-bold text-white">{(totalTableBilling / (grandTotalAll || 1) * 100).toFixed(1)}%</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] font-mono">
+                    <span className="flex items-center gap-1.5 text-zinc-400">
+                      <span className="w-2 h-2 rounded-full bg-[#1275B8] shrink-0" />
+                      Um Telecom:
+                    </span>
+                    <span className="font-bold text-white">{(umTelecomStats.grandTotal / (grandTotalAll || 1) * 100).toFixed(1)}%</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] font-mono">
+                    <span className="flex items-center gap-1.5 text-zinc-400">
+                      <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+                      Starlink:
+                    </span>
+                    <span className="font-bold text-white">{(starlinkStats.grandTotal / (grandTotalAll || 1) * 100).toFixed(1)}%</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] font-mono">
+                    <span className="flex items-center gap-1.5 text-zinc-400">
+                      <span className="w-2 h-2 rounded-full bg-[#B6202F] shrink-0" />
+                      Vectra:
+                    </span>
+                    <span className="font-bold text-white">{(vectraStats.grandTotal / (grandTotalAll || 1) * 100).toFixed(1)}%</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] font-mono">
+                    <span className="flex items-center gap-1.5 text-zinc-400">
+                      <span className="w-2 h-2 rounded-full bg-violet-500 shrink-0" />
+                      Contact Center:
+                    </span>
+                    <span className="font-bold text-white">{(totalCcBilling / (grandTotalAll || 1) * 100).toFixed(1)}%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className="bg-zinc-900/65 dark:bg-zinc-950/65 rounded-2xl p-4 border border-zinc-800/80 shrink-0 min-w-[245px] flex flex-col justify-center">
-            <span className="text-[9px] text-zinc-500 font-extrabold uppercase tracking-widest font-mono">Fatias de Participação</span>
-            <div className="space-y-1.5 mt-2.5">
-              <div className="flex items-center justify-between text-[11px] font-mono">
-                <span className="flex items-center gap-1.5 text-zinc-400">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-                  PVF (Fixo):
-                </span>
-                <span className="font-bold text-white">{(totalTableBilling / (grandTotalAll || 1) * 100).toFixed(1)}%</span>
-              </div>
-              <div className="flex items-center justify-between text-[11px] font-mono">
-                <span className="flex items-center gap-1.5 text-zinc-400">
-                  <span className="w-2 h-2 rounded-full bg-[#1275B8] shrink-0" />
-                  Um Telecom:
-                </span>
-                <span className="font-bold text-white">{(umTelecomStats.grandTotal / (grandTotalAll || 1) * 100).toFixed(1)}%</span>
-              </div>
-              <div className="flex items-center justify-between text-[11px] font-mono">
-                <span className="flex items-center gap-1.5 text-zinc-400">
-                  <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
-                  Starlink:
-                </span>
-                <span className="font-bold text-white">{(starlinkStats.grandTotal / (grandTotalAll || 1) * 100).toFixed(1)}%</span>
-              </div>
-              <div className="flex items-center justify-between text-[11px] font-mono">
-                <span className="flex items-center gap-1.5 text-zinc-400">
-                  <span className="w-2 h-2 rounded-full bg-[#B6202F] shrink-0" />
-                  Vectra:
-                </span>
-                <span className="font-bold text-white">{(vectraStats.grandTotal / (grandTotalAll || 1) * 100).toFixed(1)}%</span>
-              </div>
-              <div className="flex items-center justify-between text-[11px] font-mono">
-                <span className="flex items-center gap-1.5 text-zinc-400">
-                  <span className="w-2 h-2 rounded-full bg-violet-500 shrink-0" />
-                  Contact Center:
-                </span>
-                <span className="font-bold text-white">{(totalCcBilling / (grandTotalAll || 1) * 100).toFixed(1)}%</span>
-              </div>
+          {/* Visual Percent Bar Chart */}
+          <div className="mt-6 w-full relative z-10 border-t border-white/5 pt-4">
+            <div className="w-full bg-zinc-800 h-3 rounded-full flex overflow-hidden shadow-inner border border-zinc-800">
+              <div style={{ width: `${(totalTableBilling / (grandTotalAll || 1)) * 100}%` }} className="bg-emerald-500 h-full transition-all duration-500 hover:opacity-90" title={`PVF Fixo: ${(totalTableBilling / (grandTotalAll || 1) * 100).toFixed(1)}%`} />
+              <div style={{ width: `${(umTelecomStats.grandTotal / (grandTotalAll || 1)) * 100}%` }} className="bg-[#1275B8] h-full transition-all duration-500 hover:opacity-90" title={`Um Telecom: ${(umTelecomStats.grandTotal / (grandTotalAll || 1) * 100).toFixed(1)}%`} />
+              <div style={{ width: `${(starlinkStats.grandTotal / (grandTotalAll || 1)) * 100}%` }} className="bg-amber-500 h-full transition-all duration-500 hover:opacity-90" title={`Starlink UT: ${(starlinkStats.grandTotal / (grandTotalAll || 1) * 100).toFixed(1)}%`} />
+              <div style={{ width: `${(vectraStats.grandTotal / (grandTotalAll || 1)) * 100}%` }} className="bg-[#B6202F] h-full transition-all duration-500 hover:opacity-90" title={`Vectra: ${(vectraStats.grandTotal / (grandTotalAll || 1) * 100).toFixed(1)}%`} />
+              <div style={{ width: `${(totalCcBilling / (grandTotalAll || 1)) * 100}%` }} className="bg-violet-500 h-full transition-all duration-500 hover:opacity-90" title={`Contact Center: ${(totalCcBilling / (grandTotalAll || 1) * 100).toFixed(1)}%`} />
             </div>
           </div>
         </div>
 
-        {/* Visual Percent Bar Chart */}
-        <div className="w-full bg-zinc-800 h-3 rounded-full flex overflow-hidden mt-6 shadow-inner border border-zinc-800">
-          <div style={{ width: `${(totalTableBilling / (grandTotalAll || 1)) * 100}%` }} className="bg-emerald-500 h-full transition-all duration-500 hover:opacity-90" title={`PVF Fixo: ${(totalTableBilling / (grandTotalAll || 1) * 100).toFixed(1)}%`} />
-          <div style={{ width: `${(umTelecomStats.grandTotal / (grandTotalAll || 1)) * 100}%` }} className="bg-[#1275B8] h-full transition-all duration-500 hover:opacity-90" title={`Um Telecom: ${(umTelecomStats.grandTotal / (grandTotalAll || 1) * 100).toFixed(1)}%`} />
-          <div style={{ width: `${(starlinkStats.grandTotal / (grandTotalAll || 1)) * 100}%` }} className="bg-amber-500 h-full transition-all duration-500 hover:opacity-90" title={`Starlink UT: ${(starlinkStats.grandTotal / (grandTotalAll || 1) * 100).toFixed(1)}%`} />
-          <div style={{ width: `${(vectraStats.grandTotal / (grandTotalAll || 1)) * 100}%` }} className="bg-[#B6202F] h-full transition-all duration-500 hover:opacity-90" title={`Vectra: ${(vectraStats.grandTotal / (grandTotalAll || 1) * 100).toFixed(1)}%`} />
-          <div style={{ width: `${(totalCcBilling / (grandTotalAll || 1)) * 100}%` }} className="bg-violet-500 h-full transition-all duration-500 hover:opacity-90" title={`Contact Center: ${(totalCcBilling / (grandTotalAll || 1) * 100).toFixed(1)}%`} />
+        {/* 1.B CUSTO CONSOLIDADO DAS ATIVIDADES CARD */}
+        <div className="bg-gradient-to-br from-zinc-950 to-zinc-900 dark:from-zinc-900 dark:to-zinc-950 p-6 sm:p-8 rounded-3xl text-white shadow-xl border border-zinc-800 relative overflow-hidden group flex flex-col justify-between">
+          <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none group-hover:scale-110 transition-transform duration-500">
+            <Activity className="h-28 w-28 text-white" />
+          </div>
+          
+          <div className="relative z-10 space-y-4 w-full">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3">
+              <div className="inline-flex items-center gap-1.5 bg-white/10 text-brand-light px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase tracking-widest border border-white/20">
+                <Activity className="h-3.5 w-3.5" />
+                <span>Custo Consolidado de Atividades ({referenceMonth})</span>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+              <div className="space-y-2">
+                <h1 className="text-2xl sm:text-3.5xl font-black font-sans leading-none tracking-tight flex items-baseline gap-1.5">
+                  <span className="text-lg sm:text-xl font-normal text-zinc-400">R$</span>
+                  <span className="font-mono text-white tracking-tighter sm:text-4xl">
+                    {activitiesStats.totalCost.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </h1>
+                
+                <p className="text-xs text-zinc-400 max-w-md font-medium leading-relaxed">
+                  Consolidação total de custos operacionais.
+                </p>
+              </div>
+
+              {/* Stats Summary Panel */}
+              <div className="bg-zinc-900/65 dark:bg-zinc-950/65 rounded-2xl p-4 border border-zinc-800/80 shrink-0 min-w-[245px] flex flex-col justify-center min-h-[148px]">
+                {statsPanelContent}
+              </div>
+            </div>
+          </div>
+
+          {/* Visual Progress Bar or Partner bars */}
+          <div className="mt-6 w-full relative z-10 border-t border-white/5 pt-4">
+            {statsPanelBottomContent}
+          </div>
         </div>
+
       </div>
 
       {/* 1.1 ALERT CONTAINER FOR UNREPLICATED FUTURE MONTHS */}

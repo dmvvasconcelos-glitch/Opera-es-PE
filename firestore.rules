@@ -254,6 +254,49 @@ service cloud.firestore {
       && data.keys().size() == 6;
     }
 
+    function isValidOperationalActivity(data) {
+      return data.keys().hasAll([
+        'id',
+        'site',
+        'data',
+        'estado',
+        'cidade',
+        'origem',
+        'destino',
+        'atividadeLpuId',
+        'atividadeLpuNome',
+        'kmTotal',
+        'valorKm',
+        'valorMaterial',
+        'valorAtividade',
+        'valorTotal',
+        'parceiroId',
+        'parceiroNome'
+      ])
+      && data.id is string && data.id.size() <= 50
+      && data.site is string && data.site.size() <= 200
+      && data.data is string && data.data.size() <= 100
+      && data.estado is string && data.estado.size() <= 10
+      && data.cidade is string && data.cidade.size() <= 250
+      && data.origem is string && data.origem.size() <= 250
+      && data.destino is string && data.destino.size() <= 250
+      && data.atividadeLpuId is string && data.atividadeLpuId.size() <= 128
+      && data.atividadeLpuNome is string && data.atividadeLpuNome.size() <= 250
+      && (!('material' in data) || data.material is string)
+      && (data.kmTotal is float || data.kmTotal is int)
+      && (data.valorKm is float || data.valorKm is int)
+      && (data.valorMaterial is float || data.valorMaterial is int)
+      && (data.valorAtividade is float || data.valorAtividade is int)
+      && (data.valorTotal is float || data.valorTotal is int)
+      && data.parceiroId is string && data.parceiroId.size() <= 128
+      && data.parceiroNome is string && data.parceiroNome.size() <= 250
+      && (!('createdAt' in data) || data.createdAt is string)
+      && (!('images' in data) || data.images is list)
+      && (!('observacao' in data) || data.observacao is string)
+      && (!('status' in data) || data.status is string)
+      && (!('createdBy' in data) || data.createdBy is string);
+    }
+
     // test connectivity collection rules
     match /test/{docId} {
       allow read, write: if true;
@@ -325,6 +368,31 @@ service cloud.firestore {
     // systemUsers rules
     match /systemUsers/{userEmail} {
       allow read, write: if true;
+    }
+
+    // suppliers rules
+    match /suppliers/{supplierId} {
+      allow read: if true;
+      allow write: if isValidId(supplierId);
+    }
+
+    // lpuItems rules
+    match /lpuItems/{itemId} {
+      allow read: if true;
+      allow write: if isValidId(itemId);
+    }
+
+    // lpuSettings rules
+    match /lpuSettings/{settingId} {
+      allow read: if true;
+      allow write: if isValidId(settingId);
+    }
+
+    // operationalActivities rules
+    match /operationalActivities/{activityId} {
+      allow read: if true;
+      allow create, update: if isValidId(activityId) && isValidOperationalActivity(incoming());
+      allow delete: if isValidId(activityId);
     }
   }
 }

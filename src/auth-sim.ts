@@ -28,6 +28,12 @@ export const DEFAULT_USERS = [
     displayName: 'Cliente Demo (SEDUC)',
     role: 'cliente' as const,
     secretarias: ['SEDUC - Secretaria de Educação']
+  },
+  {
+    email: 'parceiro@portal.com',
+    password: 'parceiro123',
+    displayName: 'Parceiro de Campo',
+    role: 'parceiro' as const,
   }
 ];
 
@@ -69,7 +75,7 @@ export function getRegisteredUsers() {
   }
 }
 
-export function registerUser(email: string, password: string, displayName: string, role: 'admin' | 'editor' | 'cliente' = 'admin', secretarias: string[] = []) {
+export function registerUser(email: string, password: string, displayName: string, role: 'admin' | 'editor' | 'cliente' | 'parceiro' | 'analista' = 'admin', secretarias: string[] = []) {
   const users = getRegisteredUsers();
   if (users.some((u: any) => u.email.toLowerCase() === email.toLowerCase())) {
     throw new Error('Este e-mail já está cadastrado no sistema.');

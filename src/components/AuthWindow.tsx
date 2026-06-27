@@ -7,7 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { UserSession } from '../types';
 import { DEFAULT_USERS, saveSession } from '../auth-sim';
 import { collection, doc, getDocs, getDoc, setDoc, writeBatch } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, cleanUndefined } from '../firebase';
 import { 
   Lock, 
   Mail, 
@@ -33,7 +33,7 @@ export default function AuthWindow({ onLoginSuccess, initialMessage }: AuthWindo
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [selectedRole, setSelectedRole] = useState<'admin' | 'editor' | 'cliente'>('admin');
+  const [selectedRole, setSelectedRole] = useState<'admin' | 'editor' | 'cliente' | 'parceiro' | 'analista'>('admin');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -149,7 +149,9 @@ export default function AuthWindow({ onLoginSuccess, initialMessage }: AuthWindo
             email: matched.email,
             displayName: matched.displayName,
             role: matched.role || 'cliente',
-            secretarias: matched.secretarias || []
+            secretarias: matched.secretarias || [],
+            parceiroId: matched.parceiroId || undefined,
+            parceiroNome: matched.parceiroNome || undefined
           });
           setIsChangingPassword(true);
           setPassword('');
@@ -160,10 +162,10 @@ export default function AuthWindow({ onLoginSuccess, initialMessage }: AuthWindo
         // Save last login timestamp in Firestore
         const nowStr = new Date().toLocaleString('pt-BR');
         try {
-          await setDoc(doc(db, 'systemUsers', docId), {
+          await setDoc(doc(db, 'systemUsers', docId), cleanUndefined({
             ...matched,
             lastLogin: nowStr
-          });
+          }));
         } catch (dbErr) {
           console.warn("Failed to update lastLogin column in Firestore:", dbErr);
         }
@@ -175,7 +177,9 @@ export default function AuthWindow({ onLoginSuccess, initialMessage }: AuthWindo
           displayName: matched.displayName,
           isSimulated: true,
           role: matched.role || 'cliente',
-          secretarias: matched.secretarias || []
+          secretarias: matched.secretarias || [],
+          parceiroId: matched.parceiroId || undefined,
+          parceiroNome: matched.parceiroNome || undefined
         };
         
         saveSession(session);
@@ -207,7 +211,7 @@ export default function AuthWindow({ onLoginSuccess, initialMessage }: AuthWindo
           isFirstAccess: true
         };
 
-        await setDoc(userDocRef, newUser);
+        await setDoc(userDocRef, cleanUndefined(newUser));
         setSuccess('Cadastro realizado no Portal de Telecom com sucesso! Sua solicitação está pendente de liberação. Redirecionando...');
         
         setTimeout(() => {
@@ -283,7 +287,7 @@ export default function AuthWindow({ onLoginSuccess, initialMessage }: AuthWindo
         lastLogin: new Date().toLocaleString('pt-BR')
       };
 
-      await setDoc(userDocRef, updatedUser);
+      await setDoc(userDocRef, cleanUndefined(updatedUser));
 
       setSuccess('Senha atualizada com sucesso! Inicializando sua sessão no painel...');
 
@@ -293,7 +297,9 @@ export default function AuthWindow({ onLoginSuccess, initialMessage }: AuthWindo
         displayName: pendingSessionUser.displayName,
         isSimulated: true,
         role: pendingSessionUser.role,
-        secretarias: pendingSessionUser.secretarias
+        secretarias: pendingSessionUser.secretarias,
+        parceiroId: pendingSessionUser.parceiroId,
+        parceiroNome: pendingSessionUser.parceiroNome
       };
 
       setTimeout(() => {
@@ -560,11 +566,13 @@ export default function AuthWindow({ onLoginSuccess, initialMessage }: AuthWindo
                     <label className="block text-[11px] font-semibold text-zinc-400 uppercase tracking-wider font-mono">
                       Nível de Acesso (Desejado)
                     </label>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       {[
                         { key: 'admin', label: 'Gestor (Admin)' },
                         { key: 'editor', label: 'Cadastro' },
                         { key: 'cliente', label: 'Cliente (Restrito)' },
+                        { key: 'parceiro', label: 'Parceiro' },
+                        { key: 'analista', label: 'Analista' },
                       ].map(lvl => (
                         <button
                           key={lvl.key}

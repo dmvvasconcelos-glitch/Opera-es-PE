@@ -45,8 +45,38 @@ export interface UserSession {
   displayName: string;
   photoURL?: string;
   isSimulated: boolean;
-  role: 'admin' | 'editor' | 'viewer' | 'cliente';
+  role: 'admin' | 'editor' | 'viewer' | 'cliente' | 'parceiro' | 'analista';
   secretarias?: string[];
+  parceiroId?: string;
+  parceiroNome?: string;
+  allowedScreens?: string[];
+  editableScreens?: string[];
 }
 
-export type ActiveTab = 'dashboard' | 'contratos' | 'relatorios' | 'precos' | 'usuarios' | 'historico' | 'contact-center' | 'um-telecom' | 'vectra' | 'starlink';
+export interface Supplier {
+  id: string;
+  nome: string;
+  empresa?: string;
+  contato: string;
+  cpf: string;
+  cnpj: string;
+  endereco: string;
+  createdAt?: string;
+  areasAtuacao?: string[];
+}
+
+export interface LpuItem {
+  id: string;
+  atividade: string;
+  valor: number;
+  createdAt?: string;
+  area?: 'RMR' | 'Interior' | 'Noronha' | 'Gestão';
+}
+
+export interface LpuSettings {
+  valorQuilometragem: string;
+  raioQuilometragem: string;
+}
+
+export type ActiveTab = 'dashboard' | 'contratos' | 'relatorios' | 'precos' | 'usuarios' | 'historico' | 'contact-center' | 'um-telecom' | 'vectra' | 'starlink' | 'fornecedores' | 'parceiros' | 'lpu' | 'atividades';
+

@@ -7,17 +7,19 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'motion/react';
 import { Contract, PvfPrices, UserSession, ActiveTab } from './types';
 import { INITIAL_CONTRACTS, INITIAL_PRICES, getContractPvfTotal, getContractValue, formatCurrency } from './data';
-import { getStoredSession, clearSession } from './auth-sim';
+import { getStoredSession, clearSession, saveSession } from './auth-sim';
 import AuthWindow from './components/AuthWindow';
 import Dashboard from './components/Dashboard';
 import ContractTable from './components/ContractTable';
 import UserManagement from './components/UserManagement';
+import SuppliersManagement from './components/SuppliersManagement';
+import AtividadesManagement from './components/AtividadesManagement';
 
 import UmTelecomBilling from './components/UmTelecomBilling';
 import VectraBilling from './components/VectraBilling';
 import StarlinkBilling from './components/StarlinkBilling';
 import ContactCenterBilling from './components/ContactCenterBilling';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { db, handleFirestoreError, OperationType, cleanUndefined } from './firebase';
 import { collection, doc, getDocs, getDoc, setDoc, deleteDoc, onSnapshot, writeBatch } from 'firebase/firestore';
 import { 
   Building2, 
@@ -50,10 +52,60 @@ import {
   Globe
 } from 'lucide-react';
 
+const getRoleLabel = (role: string) => {
+  switch (role) {
+    case 'admin': return 'Administrador';
+    case 'editor': return 'Editor';
+    case 'cliente': return 'Cliente';
+    case 'parceiro': return 'Parceiro';
+    case 'analista': return 'Analista';
+    case 'viewer': return 'Visualizador';
+    default: return role;
+  }
+};
+
+const ALL_TABS: ActiveTab[] = [
+  'dashboard',
+  'contratos',
+  'contact-center',
+  'um-telecom',
+  'starlink',
+  'vectra',
+  'parceiros',
+  'lpu',
+  'atividades',
+  'usuarios'
+];
+
 export default function App() {
   // Authentication Session State
   const [user, setUser] = useState<UserSession | null>(null);
   const [sessionExpiredMessage, setSessionExpiredMessage] = useState<string>('');
+
+  const isScreenAllowed = useCallback((screenId: string) => {
+    if (!user) return false;
+    
+    if (user.allowedScreens) {
+      return user.allowedScreens.includes(screenId);
+    }
+    
+    // Default role-based visibility
+    if (user.role === 'admin') return true;
+    if (user.role === 'analista') {
+      return ['parceiros', 'lpu', 'atividades'].includes(screenId);
+    }
+    if (user.role === 'parceiro') {
+      return screenId === 'atividades';
+    }
+    // For others (editor, viewer, cliente)
+    if (screenId === 'usuarios' || screenId === 'parceiros' || screenId === 'lpu') {
+      return false;
+    }
+    if (user.role === 'editor' && screenId === 'atividades') {
+      return false;
+    }
+    return true;
+  }, [user]);
   
   // Inactivity timeout tracking
   const lastActivityRef = useRef<number>(Date.now());
@@ -82,6 +134,7 @@ export default function App() {
   const [faturamentoPeiiOpen, setFaturamentoPeiiOpen] = useState(false);
   const [pontoVozFixoOpen, setPontoVozFixoOpen] = useState(true);
   const [contactCenterOpen, setContactCenterOpen] = useState(true);
+  const [fornecedoresOpen, setFornecedoresOpen] = useState(false);
 
   // Initialize and load persistent user, contracts and system prices
   useEffect(() => {
@@ -249,6 +302,21 @@ export default function App() {
     };
   }, []);
 
+  // Redirect to first allowed screen if the active tab is not allowed
+  useEffect(() => {
+    if (user) {
+      const isAllowed = isScreenAllowed(activeTab);
+      if (!isAllowed) {
+        const firstAllowed = ALL_TABS.find(tab => isScreenAllowed(tab));
+        if (firstAllowed) {
+          setActiveTab(firstAllowed);
+        } else {
+          setActiveTab('dashboard');
+        }
+      }
+    }
+  }, [user, activeTab, isScreenAllowed]);
+
   // Update classes and configurations for dark mode toggles
   const toggleDarkMode = () => {
     const newVal = !darkMode;
@@ -350,24 +418,44 @@ export default function App() {
       return;
     }
 
+    let active = true;
     const emailKey = user.email.trim().toLowerCase();
     const userDocRef = doc(db, 'systemUsers', emailKey);
 
     const updatePresence = async (isInitialSetup: boolean = false) => {
       try {
         const docSnap = await getDoc(userDocRef);
+        if (!active) return;
+
         const nowStr = new Date().toLocaleString('pt-BR');
         const nowIso = new Date().toISOString();
         if (docSnap.exists()) {
           const currentData = docSnap.data();
-          await setDoc(userDocRef, {
+          await setDoc(userDocRef, cleanUndefined({
             ...currentData,
             lastLogin: isInitialSetup ? nowStr : (currentData.lastLogin || nowStr),
             lastActiveAt: nowIso
-          }, { merge: true });
+          }), { merge: true });
+
+          if (!active) return;
+
+          if (isInitialSetup) {
+            const updatedUser: UserSession = {
+              ...user,
+              displayName: currentData.displayName || user.displayName,
+              role: currentData.role || user.role,
+              secretarias: currentData.secretarias || user.secretarias,
+              parceiroId: currentData.parceiroId || user.parceiroId,
+              parceiroNome: currentData.parceiroNome || user.parceiroNome,
+              allowedScreens: currentData.allowedScreens || undefined,
+              editableScreens: currentData.editableScreens || undefined,
+            };
+            setUser(updatedUser);
+            saveSession(updatedUser);
+          }
         } else {
           // Keep a robust fallback profile inside Firestore
-          await setDoc(userDocRef, {
+          await setDoc(userDocRef, cleanUndefined({
             email: user.email,
             displayName: user.displayName,
             role: user.role,
@@ -375,7 +463,7 @@ export default function App() {
             secretarias: user.secretarias || [],
             lastLogin: nowStr,
             lastActiveAt: nowIso
-          }, { merge: true });
+          }), { merge: true });
         }
       } catch (err) {
         console.warn("Falha ao sincronizar presença no Firestore:", err);
@@ -395,6 +483,7 @@ export default function App() {
     }, 20000);
 
     return () => {
+      active = false;
       clearInterval(interval);
     };
   }, [user]);
@@ -482,6 +571,7 @@ export default function App() {
         onLoginSuccess={(session) => {
           setUser(session);
           setSessionExpiredMessage('');
+          setActiveTab('dashboard');
         }} 
         initialMessage={sessionExpiredMessage}
       />
@@ -523,6 +613,9 @@ export default function App() {
       case 'um-telecom': return 'Faturamento Infra e Elétrica PCM';
       case 'vectra': return 'Faturamento Vectra';
       case 'starlink': return 'Implantação Starlink';
+      case 'parceiros': return 'Cadastro de Parceiros';
+      case 'lpu': return 'LPU de Serviços';
+      case 'atividades': return 'Atividades Operacionais';
       default: return 'Portal';
     }
   };
@@ -578,48 +671,242 @@ export default function App() {
 
           {/* Navigation group */}
           <div className="px-4 py-6 flex flex-col gap-1.5 overflow-y-auto max-h-[calc(100vh-180px)] scrollbar-none">
-            {/* Title / Section Category */}
-            {!isSidebarCollapsed && (
-              <span className="block px-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1">
-                Menu Principal
-              </span>
-            )}
+            {user?.role === 'parceiro' && !user?.allowedScreens ? (
+              <button
+                onClick={() => setActiveTab('atividades')}
+                className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-1' : 'gap-3 px-3'} py-2.5 rounded-xl text-left transition-all duration-200 cursor-pointer ${
+                  activeTab === 'atividades'
+                    ? 'bg-brand-medium/50 dark:bg-zinc-900 text-white font-bold shadow-md shadow-brand-deep/30'
+                    : 'hover:bg-brand-medium/20 dark:hover:bg-zinc-900/40 text-zinc-300 hover:text-white'
+                }`}
+                title={isSidebarCollapsed ? "Atividades" : undefined}
+              >
+                <Activity className={`h-4.5 w-4.5 shrink-0 ${activeTab === 'atividades' ? 'text-brand-light dark:text-brand animate-pulse' : 'text-zinc-400'}`} />
+                {!isSidebarCollapsed && <span className="text-xs font-bold">Atividades Operacionais</span>}
+              </button>
+            ) : (
+              <>
+                {/* Title / Section Category */}
+                {!isSidebarCollapsed && isScreenAllowed('dashboard') && (
+                  <span className="block px-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1">
+                    Menu Principal
+                  </span>
+                )}
 
-            {/* Painel Gerencial (Dashboard) */}
-            <button
-              onClick={() => setActiveTab('dashboard')}
-              className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-1' : 'gap-3 px-3'} py-2.5 rounded-xl text-left transition-all duration-200 cursor-pointer ${
-                activeTab === 'dashboard'
-                  ? 'bg-brand-medium/50 dark:bg-zinc-900 text-white font-bold shadow-md shadow-brand-deep/30'
-                  : 'hover:bg-brand-medium/20 dark:hover:bg-zinc-900/40 text-zinc-300 hover:text-white'
-              }`}
-              title={isSidebarCollapsed ? "Painel Gerencial" : undefined}
-            >
-              <LayoutDashboard className={`h-4.5 w-4.5 shrink-0 ${activeTab === 'dashboard' ? 'text-brand-light dark:text-brand animate-pulse' : 'text-zinc-400'}`} />
-              {!isSidebarCollapsed && <span className="text-xs">Painel Gerencial</span>}
-            </button>
+                {/* Painel Gerencial (Dashboard) */}
+                {isScreenAllowed('dashboard') && (
+                  <button
+                    onClick={() => setActiveTab('dashboard')}
+                    className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-1' : 'gap-3 px-3'} py-2.5 rounded-xl text-left transition-all duration-200 cursor-pointer ${
+                      activeTab === 'dashboard'
+                        ? 'bg-brand-medium/50 dark:bg-zinc-900 text-white font-bold shadow-md shadow-brand-deep/30'
+                        : 'hover:bg-brand-medium/20 dark:hover:bg-zinc-900/40 text-zinc-300 hover:text-white'
+                    }`}
+                    title={isSidebarCollapsed ? "Painel Gerencial" : undefined}
+                  >
+                    <LayoutDashboard className={`h-4.5 w-4.5 shrink-0 ${activeTab === 'dashboard' ? 'text-brand-light dark:text-brand animate-pulse' : 'text-zinc-400'}`} />
+                    {!isSidebarCollapsed && <span className="text-xs">Painel Gerencial</span>}
+                  </button>
+                )}
 
-            {/* Faturamento PEII (Collapsible Menu Level 1) */}
-            {!isSidebarCollapsed ? (
+                {/* Faturamento PEII (Collapsible Menu Level 1) */}
+                {(isScreenAllowed('contratos') || isScreenAllowed('contact-center') || isScreenAllowed('um-telecom') || isScreenAllowed('starlink') || isScreenAllowed('vectra')) && (!isSidebarCollapsed ? (
+                  <div className="space-y-1">
+                    <button
+                      onClick={() => setFaturamentoPeiiOpen(!faturamentoPeiiOpen)}
+                      className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-all duration-200 hover:bg-brand-medium/20 dark:hover:bg-zinc-900/40 text-zinc-300 hover:text-white cursor-pointer"
+                    >
+                      <div className="flex items-center gap-3">
+                        <TableProperties className="h-4.5 w-4.5 shrink-0 text-zinc-400" />
+                        <span className="text-xs">Faturamento PEII</span>
+                      </div>
+                      {faturamentoPeiiOpen ? (
+                        <ChevronDown className="h-3.5 w-3.5 text-zinc-400" />
+                      ) : (
+                        <ChevronRight className="h-3.5 w-3.5 text-zinc-400" />
+                      )}
+                    </button>
+
+                    <AnimatePresence initial={false}>
+                      {faturamentoPeiiOpen && (
+                        <motion.div 
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.25, ease: "easeInOut" }}
+                          className="overflow-hidden pl-4 ml-2.5 border-l border-brand-border/20 dark:border-zinc-900 space-y-1.5 py-1"
+                        >
+                          {isScreenAllowed('contratos') && (
+                            <button
+                              onClick={() => setActiveTab('contratos')}
+                              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all duration-200 cursor-pointer ${
+                                activeTab === 'contratos'
+                                  ? 'bg-brand/45 dark:bg-zinc-850 text-white font-bold'
+                                  : 'hover:bg-brand-medium/15 dark:hover:bg-zinc-900/35 text-zinc-350 hover:text-white'
+                              }`}
+                            >
+                              <Phone className={`h-4 w-4 shrink-0 ${activeTab === 'contratos' ? 'text-brand-light dark:text-brand' : 'text-zinc-500'}`} />
+                              <span className="text-xs">Ponto de Voz Fixo</span>
+                            </button>
+                          )}
+
+                          {isScreenAllowed('contact-center') && (
+                            <button
+                              onClick={() => setActiveTab('contact-center')}
+                              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all duration-200 cursor-pointer ${
+                                activeTab === 'contact-center'
+                                  ? 'bg-brand/45 dark:bg-zinc-850 text-white font-bold'
+                                  : 'hover:bg-brand-medium/15 dark:hover:bg-zinc-900/35 text-zinc-350 hover:text-white'
+                              }`}
+                            >
+                              <Headset className={`h-4 w-4 shrink-0 ${activeTab === 'contact-center' ? 'text-brand-light dark:text-brand' : 'text-zinc-500'}`} />
+                              <span className="text-xs">Contact Center</span>
+                            </button>
+                          )}
+
+                          {isScreenAllowed('um-telecom') && (
+                            <button
+                              onClick={() => setActiveTab('um-telecom')}
+                              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all duration-200 cursor-pointer ${
+                                activeTab === 'um-telecom'
+                                  ? 'bg-brand/45 dark:bg-zinc-850 text-white font-bold'
+                                  : 'hover:bg-brand-medium/15 dark:hover:bg-zinc-900/35 text-zinc-350 hover:text-white'
+                              }`}
+                            >
+                              <Zap className={`h-4 w-4 shrink-0 ${activeTab === 'um-telecom' ? 'text-brand-light dark:text-brand' : 'text-zinc-500'}`} />
+                              <span className="text-xs">Um Telecom</span>
+                            </button>
+                          )}
+
+                          {isScreenAllowed('starlink') && (
+                            <button
+                              onClick={() => setActiveTab('starlink')}
+                              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all duration-200 cursor-pointer ${
+                                activeTab === 'starlink'
+                                  ? 'bg-brand/45 dark:bg-zinc-850 text-white font-bold'
+                                  : 'hover:bg-brand-medium/15 dark:hover:bg-zinc-900/35 text-zinc-350 hover:text-white'
+                              }`}
+                            >
+                              <Globe className={`h-4 w-4 shrink-0 ${activeTab === 'starlink' ? 'text-brand-light dark:text-brand' : 'text-zinc-500'}`} />
+                              <span className="text-xs">Starlink</span>
+                            </button>
+                          )}
+
+                          {isScreenAllowed('vectra') && (
+                            <button
+                              onClick={() => setActiveTab('vectra')}
+                              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all duration-200 cursor-pointer ${
+                                activeTab === 'vectra'
+                                  ? 'bg-brand/45 dark:bg-zinc-850 text-white font-bold'
+                                  : 'hover:bg-brand-medium/15 dark:hover:bg-zinc-900/35 text-zinc-350 hover:text-white'
+                              }`}
+                            >
+                              <Network className={`h-4 w-4 shrink-0 ${activeTab === 'vectra' ? 'text-brand-light dark:text-brand' : 'text-zinc-500'}`} />
+                              <span className="text-xs flex items-center justify-between w-full">
+                                <span>Vectra</span>
+                                <span className="text-[8px] tracking-wide font-black bg-amber-500/10 text-amber-500 dark:text-amber-400 dark:bg-amber-500/15 px-1 py-0.5 rounded font-sans uppercase">Homolog.</span>
+                              </span>
+                            </button>
+                          )}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-1.5 py-3 border-t border-b border-brand-border/10 dark:border-zinc-900 my-1">
+                    {isScreenAllowed('contratos') && (
+                      <button
+                        onClick={() => setActiveTab('contratos')}
+                        className={`w-full flex items-center justify-center py-2.5 rounded-xl transition-all duration-200 cursor-pointer ${
+                          activeTab === 'contratos'
+                            ? 'bg-brand-medium dark:bg-zinc-900 text-white shadow-sm'
+                            : 'hover:bg-brand-medium/20 text-zinc-400 hover:text-white'
+                        }`}
+                        title="Ponto de Voz Fixo (PVF)"
+                      >
+                        <Phone className={`h-4.5 w-4.5 ${activeTab === 'contratos' ? 'text-brand-light dark:text-brand animate-pulse' : 'text-zinc-400'}`} />
+                      </button>
+                    )}
+
+                    {isScreenAllowed('contact-center') && (
+                      <button
+                        onClick={() => setActiveTab('contact-center')}
+                        className={`w-full flex items-center justify-center py-2.5 rounded-xl transition-all duration-200 cursor-pointer ${
+                          activeTab === 'contact-center'
+                            ? 'bg-brand-medium dark:bg-zinc-900 text-white shadow-sm'
+                            : 'hover:bg-brand-medium/20 text-zinc-400 hover:text-white'
+                        }`}
+                        title="Contact Center"
+                      >
+                        <Headset className={`h-4.5 w-4.5 ${activeTab === 'contact-center' ? 'text-brand-light dark:text-brand animate-pulse' : 'text-zinc-400'}`} />
+                      </button>
+                    )}
+
+                    {isScreenAllowed('um-telecom') && (
+                      <button
+                        onClick={() => setActiveTab('um-telecom')}
+                        className={`w-full flex items-center justify-center py-2.5 rounded-xl transition-all duration-200 cursor-pointer ${
+                          activeTab === 'um-telecom'
+                            ? 'bg-brand-medium dark:bg-zinc-900 text-white shadow-sm'
+                            : 'hover:bg-brand-medium/20 text-zinc-400 hover:text-white'
+                        }`}
+                        title="Um Telecom"
+                      >
+                        <Zap className={`h-4.5 w-4.5 ${activeTab === 'um-telecom' ? 'text-brand-light dark:text-brand animate-pulse' : 'text-zinc-400'}`} />
+                      </button>
+                    )}
+
+                    {isScreenAllowed('starlink') && (
+                      <button
+                        onClick={() => setActiveTab('starlink')}
+                        className={`w-full flex items-center justify-center py-2.5 rounded-xl transition-all duration-200 cursor-pointer ${
+                          activeTab === 'starlink'
+                            ? 'bg-brand-medium dark:bg-zinc-900 text-white shadow-sm'
+                            : 'hover:bg-brand-medium/20 text-zinc-400 hover:text-white'
+                        }`}
+                        title="Starlink"
+                      >
+                        <Globe className={`h-4.5 w-4.5 ${activeTab === 'starlink' ? 'text-brand-light dark:text-brand animate-pulse' : 'text-zinc-400'}`} />
+                      </button>
+                    )}
+
+                    {isScreenAllowed('vectra') && (
+                      <button
+                        onClick={() => setActiveTab('vectra')}
+                        className={`w-full flex items-center justify-center py-2.5 rounded-xl transition-all duration-200 cursor-pointer ${
+                          activeTab === 'vectra'
+                            ? 'bg-brand-medium dark:bg-zinc-900 text-white shadow-sm'
+                            : 'hover:bg-brand-medium/20 text-zinc-400 hover:text-white'
+                        }`}
+                        title="Vectra"
+                      >
+                        <Network className={`h-4.5 w-4.5 ${activeTab === 'vectra' ? 'text-brand-light dark:text-brand animate-pulse' : 'text-zinc-400'}`} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+
+            {/* Fornecedores & LPU (Collapsible Menu Level 1) */}
+            {(isScreenAllowed('parceiros') || isScreenAllowed('lpu') || isScreenAllowed('atividades')) && (!isSidebarCollapsed ? (
               <div className="space-y-1">
                 <button
-                  onClick={() => setFaturamentoPeiiOpen(!faturamentoPeiiOpen)}
+                  onClick={() => setFornecedoresOpen(!fornecedoresOpen)}
                   className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-all duration-200 hover:bg-brand-medium/20 dark:hover:bg-zinc-900/40 text-zinc-300 hover:text-white cursor-pointer"
                 >
                   <div className="flex items-center gap-3">
-                    <TableProperties className="h-4.5 w-4.5 shrink-0 text-zinc-400" />
-                    <span className="text-xs">Faturamento PEII</span>
+                    <Building2 className="h-4.5 w-4.5 shrink-0 text-zinc-400" />
+                    <span className="text-xs">Fornecedores & LPU</span>
                   </div>
-                  {faturamentoPeiiOpen ? (
+                  {fornecedoresOpen ? (
                     <ChevronDown className="h-3.5 w-3.5 text-zinc-400" />
                   ) : (
                     <ChevronRight className="h-3.5 w-3.5 text-zinc-400" />
                   )}
                 </button>
 
-                {/* Submenus of Faturamento PEII */}
+                {/* Submenus of Fornecedores */}
                 <AnimatePresence initial={false}>
-                  {faturamentoPeiiOpen && (
+                  {fornecedoresOpen && (
                     <motion.div 
                       initial={{ height: 0, opacity: 0 }}
                       animate={{ height: "auto", opacity: 1 }}
@@ -627,73 +914,50 @@ export default function App() {
                       transition={{ duration: 0.25, ease: "easeInOut" }}
                       className="overflow-hidden pl-4 ml-2.5 border-l border-brand-border/20 dark:border-zinc-900 space-y-1.5 py-1"
                     >
-                      {/* Ponto de Voz Fixo (Direct option) */}
-                      <button
-                        onClick={() => setActiveTab('contratos')}
-                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all duration-200 cursor-pointer ${
-                          activeTab === 'contratos'
-                            ? 'bg-brand/45 dark:bg-zinc-850 text-white font-bold'
-                            : 'hover:bg-brand-medium/15 dark:hover:bg-zinc-900/35 text-zinc-350 hover:text-white'
-                        }`}
-                      >
-                        <Phone className={`h-4 w-4 shrink-0 ${activeTab === 'contratos' ? 'text-brand-light dark:text-brand' : 'text-zinc-500'}`} />
-                        <span className="text-xs">Ponto de Voz Fixo</span>
-                      </button>
+                      {/* Parceiros (Cadastro de Parceiros) */}
+                      {isScreenAllowed('parceiros') && (
+                        <button
+                          onClick={() => setActiveTab('parceiros')}
+                          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all duration-200 cursor-pointer ${
+                            activeTab === 'parceiros'
+                              ? 'bg-brand/45 dark:bg-zinc-850 text-white font-bold'
+                              : 'hover:bg-brand-medium/15 dark:hover:bg-zinc-900/35 text-zinc-350 hover:text-white'
+                          }`}
+                        >
+                          <Users className={`h-4 w-4 shrink-0 ${activeTab === 'parceiros' ? 'text-brand-light dark:text-brand' : 'text-zinc-500'}`} />
+                          <span className="text-xs">Parceiros</span>
+                        </button>
+                      )}
 
-                      {/* Contact Center (Direct option) */}
-                      <button
-                        onClick={() => setActiveTab('contact-center')}
-                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all duration-200 cursor-pointer ${
-                          activeTab === 'contact-center'
-                            ? 'bg-brand/45 dark:bg-zinc-850 text-white font-bold'
-                            : 'hover:bg-brand-medium/15 dark:hover:bg-zinc-900/35 text-zinc-350 hover:text-white'
-                        }`}
-                      >
-                        <Headset className={`h-4 w-4 shrink-0 ${activeTab === 'contact-center' ? 'text-brand-light dark:text-brand' : 'text-zinc-500'}`} />
-                        <span className="text-xs">Contact Center</span>
-                      </button>
+                      {/* LPU (LPU de Serviços) */}
+                      {isScreenAllowed('lpu') && (
+                        <button
+                          onClick={() => setActiveTab('lpu')}
+                          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all duration-200 cursor-pointer ${
+                            activeTab === 'lpu'
+                              ? 'bg-brand/45 dark:bg-zinc-850 text-white font-bold'
+                              : 'hover:bg-brand-medium/15 dark:hover:bg-zinc-900/35 text-zinc-350 hover:text-white'
+                          }`}
+                        >
+                          <TrendingUp className={`h-4 w-4 shrink-0 ${activeTab === 'lpu' ? 'text-brand-light dark:text-brand' : 'text-zinc-500'}`} />
+                          <span className="text-xs">LPU de Serviços</span>
+                        </button>
+                      )}
 
-                      {/* Um Telecom (Direct option) */}
-                      <button
-                        onClick={() => setActiveTab('um-telecom')}
-                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all duration-200 cursor-pointer ${
-                          activeTab === 'um-telecom'
-                            ? 'bg-brand/45 dark:bg-zinc-850 text-white font-bold'
-                            : 'hover:bg-brand-medium/15 dark:hover:bg-zinc-900/35 text-zinc-350 hover:text-white'
-                        }`}
-                      >
-                        <Zap className={`h-4 w-4 shrink-0 ${activeTab === 'um-telecom' ? 'text-brand-light dark:text-brand' : 'text-zinc-500'}`} />
-                        <span className="text-xs">Um Telecom</span>
-                      </button>
-
-                      {/* Implantação Starlink (Direct option) */}
-                      <button
-                        onClick={() => setActiveTab('starlink')}
-                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all duration-200 cursor-pointer ${
-                          activeTab === 'starlink'
-                            ? 'bg-brand/45 dark:bg-zinc-850 text-white font-bold'
-                            : 'hover:bg-brand-medium/15 dark:hover:bg-zinc-900/35 text-zinc-350 hover:text-white'
-                        }`}
-                      >
-                        <Globe className={`h-4 w-4 shrink-0 ${activeTab === 'starlink' ? 'text-brand-light dark:text-brand' : 'text-zinc-500'}`} />
-                        <span className="text-xs">Starlink</span>
-                      </button>
-
-                      {/* Vectra (Direct option) */}
-                      <button
-                        onClick={() => setActiveTab('vectra')}
-                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all duration-200 cursor-pointer ${
-                          activeTab === 'vectra'
-                            ? 'bg-brand/45 dark:bg-zinc-850 text-white font-bold'
-                            : 'hover:bg-brand-medium/15 dark:hover:bg-zinc-900/35 text-zinc-350 hover:text-white'
-                        }`}
-                      >
-                        <Network className={`h-4 w-4 shrink-0 ${activeTab === 'vectra' ? 'text-brand-light dark:text-brand' : 'text-zinc-500'}`} />
-                        <span className="text-xs flex items-center justify-between w-full">
-                          <span>Vectra</span>
-                          <span className="text-[8px] tracking-wide font-black bg-amber-500/10 text-amber-500 dark:text-amber-400 dark:bg-amber-500/15 px-1 py-0.5 rounded font-sans uppercase">Homolog.</span>
-                        </span>
-                      </button>
+                      {/* Atividades */}
+                      {isScreenAllowed('atividades') && (
+                        <button
+                          onClick={() => setActiveTab('atividades')}
+                          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all duration-200 cursor-pointer ${
+                            activeTab === 'atividades'
+                              ? 'bg-brand/45 dark:bg-zinc-850 text-white font-bold'
+                              : 'hover:bg-brand-medium/15 dark:hover:bg-zinc-900/35 text-zinc-350 hover:text-white'
+                          }`}
+                        >
+                          <Activity className={`h-4 w-4 shrink-0 ${activeTab === 'atividades' ? 'text-brand-light dark:text-brand' : 'text-zinc-500'}`} />
+                          <span className="text-xs">Atividades</span>
+                        </button>
+                      )}
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -701,75 +965,57 @@ export default function App() {
             ) : (
               // Collapsed alternative flat submenu direct items, clean mapping
               <div className="flex flex-col gap-1.5 py-3 border-t border-b border-brand-border/10 dark:border-zinc-900 my-1">
-                {/* Ponto de Voz Fixo (Phone icon) */}
-                <button
-                  onClick={() => setActiveTab('contratos')}
-                  className={`w-full flex items-center justify-center py-2.5 rounded-xl transition-all duration-200 cursor-pointer ${
-                    activeTab === 'contratos'
-                      ? 'bg-brand-medium dark:bg-zinc-900 text-white shadow-sm'
-                      : 'hover:bg-brand-medium/20 text-zinc-400 hover:text-white'
-                  }`}
-                  title="Ponto de Voz Fixo (PVF)"
-                >
-                  <Phone className={`h-4.5 w-4.5 ${activeTab === 'contratos' ? 'text-brand-light dark:text-brand animate-pulse' : 'text-zinc-400'}`} />
-                </button>
+                {/* Parceiros */}
+                {isScreenAllowed('parceiros') && (
+                  <button
+                    onClick={() => setActiveTab('parceiros')}
+                    className={`w-full flex items-center justify-center py-2.5 rounded-xl transition-all duration-205 cursor-pointer ${
+                      activeTab === 'parceiros'
+                        ? 'bg-brand-medium dark:bg-zinc-900 text-white shadow-sm'
+                        : 'hover:bg-brand-medium/20 text-zinc-400 hover:text-white'
+                    }`}
+                    title="Parceiros"
+                  >
+                    <Users className={`h-4.5 w-4.5 ${activeTab === 'parceiros' ? 'text-brand-light dark:text-brand animate-pulse' : 'text-zinc-400'}`} />
+                  </button>
+                )}
 
-                {/* Contact Center (Headset icon) */}
-                <button
-                  onClick={() => setActiveTab('contact-center')}
-                  className={`w-full flex items-center justify-center py-2.5 rounded-xl transition-all duration-200 cursor-pointer ${
-                    activeTab === 'contact-center'
-                      ? 'bg-brand-medium dark:bg-zinc-900 text-white shadow-sm'
-                      : 'hover:bg-brand-medium/20 text-zinc-400 hover:text-white'
-                  }`}
-                  title="Contact Center"
-                >
-                  <Headset className={`h-4.5 w-4.5 ${activeTab === 'contact-center' ? 'text-brand-light dark:text-brand animate-pulse' : 'text-zinc-400'}`} />
-                </button>
+                {/* LPU de Serviços */}
+                {isScreenAllowed('lpu') && (
+                  <button
+                    onClick={() => setActiveTab('lpu')}
+                    className={`w-full flex items-center justify-center py-2.5 rounded-xl transition-all duration-205 cursor-pointer ${
+                      activeTab === 'lpu'
+                        ? 'bg-brand-medium dark:bg-zinc-900 text-white shadow-sm'
+                        : 'hover:bg-brand-medium/20 text-zinc-400 hover:text-white'
+                    }`}
+                    title="LPU de Serviços"
+                  >
+                    <TrendingUp className={`h-4.5 w-4.5 ${activeTab === 'lpu' ? 'text-brand-light dark:text-brand animate-pulse' : 'text-zinc-400'}`} />
+                  </button>
+                )}
 
-                {/* Um Telecom (Zap icon) */}
-                <button
-                  onClick={() => setActiveTab('um-telecom')}
-                  className={`w-full flex items-center justify-center py-2.5 rounded-xl transition-all duration-200 cursor-pointer ${
-                    activeTab === 'um-telecom'
-                      ? 'bg-brand-medium dark:bg-zinc-900 text-white shadow-sm'
-                      : 'hover:bg-brand-medium/20 text-zinc-400 hover:text-white'
-                  }`}
-                  title="Um Telecom"
-                >
-                  <Zap className={`h-4.5 w-4.5 ${activeTab === 'um-telecom' ? 'text-brand-light dark:text-brand animate-pulse' : 'text-zinc-400'}`} />
-                </button>
-
-                {/* Starlink (Globe icon) */}
-                <button
-                  onClick={() => setActiveTab('starlink')}
-                  className={`w-full flex items-center justify-center py-2.5 rounded-xl transition-all duration-200 cursor-pointer ${
-                    activeTab === 'starlink'
-                      ? 'bg-brand-medium dark:bg-zinc-900 text-white shadow-sm'
-                      : 'hover:bg-brand-medium/20 text-zinc-400 hover:text-white'
-                  }`}
-                  title="Starlink"
-                >
-                  <Globe className={`h-4.5 w-4.5 ${activeTab === 'starlink' ? 'text-brand-light dark:text-brand animate-pulse' : 'text-zinc-400'}`} />
-                </button>
-
-                {/* Vectra (Network icon) */}
-                <button
-                  onClick={() => setActiveTab('vectra')}
-                  className={`w-full flex items-center justify-center py-2.5 rounded-xl transition-all duration-200 cursor-pointer ${
-                    activeTab === 'vectra'
-                      ? 'bg-brand-medium dark:bg-zinc-900 text-white shadow-sm'
-                      : 'hover:bg-brand-medium/20 text-zinc-400 hover:text-white'
-                  }`}
-                  title="Vectra"
-                >
-                  <Network className={`h-4.5 w-4.5 ${activeTab === 'vectra' ? 'text-brand-light dark:text-brand animate-pulse' : 'text-zinc-400'}`} />
-                </button>
+                {/* Atividades */}
+                {isScreenAllowed('atividades') && (
+                  <button
+                    onClick={() => setActiveTab('atividades')}
+                    className={`w-full flex items-center justify-center py-2.5 rounded-xl transition-all duration-205 cursor-pointer ${
+                      activeTab === 'atividades'
+                        ? 'bg-brand-medium dark:bg-zinc-900 text-white shadow-sm'
+                        : 'hover:bg-brand-medium/20 text-zinc-400 hover:text-white'
+                    }`}
+                    title="Atividades"
+                  >
+                    <Activity className={`h-4.5 w-4.5 ${activeTab === 'atividades' ? 'text-brand-light dark:text-brand animate-pulse' : 'text-zinc-400'}`} />
+                  </button>
+                )}
               </div>
+            ))}
+              </>
             )}
 
             {/* Usuários (Admin) */}
-            {user && user.role === 'admin' && (
+            {isScreenAllowed('usuarios') && (
               <button
                 onClick={() => setActiveTab('usuarios')}
                 className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-1' : 'gap-3 px-3'} py-2.5 rounded-xl text-left transition-all duration-200 cursor-pointer ${
@@ -801,7 +1047,7 @@ export default function App() {
                   {user.email}
                 </span>
                 <span className="inline-block mt-1 text-[8px] font-black uppercase tracking-wider px-1.5 py-0.2 bg-zinc-800 dark:bg-zinc-900 text-zinc-350 dark:text-zinc-404 border border-zinc-700/55 rounded font-mono">
-                  {user.role}
+                  {getRoleLabel(user.role)}
                 </span>
               </div>
             )}
@@ -904,137 +1150,248 @@ export default function App() {
                     </span>
                     
                     <nav className="space-y-1.5">
-                      {/* Painel Gerencial */}
-                      <button
-                        onClick={() => {
-                          setActiveTab('dashboard');
-                          setIsMobileSidebarOpen(false);
-                        }}
-                        className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left transition-all cursor-pointer ${
-                          activeTab === 'dashboard'
-                            ? 'bg-zinc-900 text-white font-bold border-l-4 border-brand pl-2'
-                            : 'hover:bg-zinc-900/40 text-zinc-404 hover:text-white'
-                        }`}
-                      >
-                        <LayoutDashboard className={`h-4.5 w-4.5 shrink-0 ${activeTab === 'dashboard' ? 'text-brand' : 'text-zinc-500'}`} />
-                        <span className="text-xs">Painel Gerencial</span>
-                      </button>
-
-                      {/* Faturamento PEII (Collapsible Menu Level 1) */}
-                      <div className="space-y-1">
+                      {user?.role === 'parceiro' && !user?.allowedScreens ? (
                         <button
-                          onClick={() => setFaturamentoPeiiOpen(!faturamentoPeiiOpen)}
-                          className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-all hover:bg-zinc-900/40 text-zinc-400 hover:text-white cursor-pointer"
+                          onClick={() => {
+                            setIsMobileSidebarOpen(false);
+                            setActiveTab('atividades');
+                          }}
+                          className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left transition-all cursor-pointer ${
+                            activeTab === 'atividades'
+                              ? 'bg-zinc-900 text-white font-bold border-l-4 border-brand pl-2'
+                              : 'hover:bg-zinc-900/40 text-zinc-404 hover:text-white'
+                          }`}
                         >
-                          <div className="flex items-center gap-3">
-                            <TableProperties className="h-4.5 w-4.5 shrink-0 text-zinc-500" />
-                            <span className="text-xs">Faturamento PEII</span>
-                          </div>
-                          {faturamentoPeiiOpen ? (
-                            <ChevronDown className="h-3.5 w-3.5 text-zinc-500" />
-                          ) : (
-                            <ChevronRight className="h-3.5 w-3.5 text-zinc-500" />
-                          )}
+                          <Activity className={`h-4.5 w-4.5 shrink-0 ${activeTab === 'atividades' ? 'text-brand' : 'text-zinc-500'}`} />
+                          <span className="text-xs">Atividades Operacionais</span>
                         </button>
-
-                        <AnimatePresence initial={false}>
-                          {faturamentoPeiiOpen && (
-                            <motion.div 
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: "auto", opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.25, ease: "easeInOut" }}
-                              className="overflow-hidden pl-4 ml-2 border-l border-zinc-800 space-y-1.5 py-1"
+                      ) : (
+                        <>
+                          {/* Painel Gerencial */}
+                          {isScreenAllowed('dashboard') && (
+                            <button
+                              onClick={() => {
+                                setActiveTab('dashboard');
+                                setIsMobileSidebarOpen(false);
+                              }}
+                              className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left transition-all cursor-pointer ${
+                                activeTab === 'dashboard'
+                                  ? 'bg-zinc-900 text-white font-bold border-l-4 border-brand pl-2'
+                                  : 'hover:bg-zinc-900/40 text-zinc-404 hover:text-white'
+                              }`}
                             >
-                              {/* Ponto de Voz Fixo (Direct option) */}
-                              <button
-                                onClick={() => {
-                                  setActiveTab('contratos');
-                                  setIsMobileSidebarOpen(false);
-                                }}
-                                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-all cursor-pointer ${
-                                  activeTab === 'contratos'
-                                    ? 'bg-zinc-900 text-white font-bold'
-                                    : 'hover:bg-zinc-900/30 text-zinc-404 hover:text-white'
-                                }`}
-                              >
-                                <Phone className={`h-4 w-4 shrink-0 ${activeTab === 'contratos' ? 'text-brand' : 'text-zinc-550'}`} />
-                                <span className="text-xs">Ponto de Voz Fixo</span>
-                              </button>
-
-                              {/* Contact Center (Direct option) */}
-                              <button
-                                onClick={() => {
-                                  setActiveTab('contact-center');
-                                  setIsMobileSidebarOpen(false);
-                                }}
-                                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-all cursor-pointer ${
-                                  activeTab === 'contact-center'
-                                    ? 'bg-zinc-900 text-white font-bold'
-                                    : 'hover:bg-zinc-900/30 text-zinc-404 hover:text-white'
-                                }`}
-                              >
-                                <Headset className={`h-4 w-4 shrink-0 ${activeTab === 'contact-center' ? 'text-brand' : 'text-zinc-550'}`} />
-                                <span className="text-xs">Contact Center</span>
-                              </button>
-
-                              {/* Um Telecom (Direct option) */}
-                              <button
-                                onClick={() => {
-                                  setActiveTab('um-telecom');
-                                  setIsMobileSidebarOpen(false);
-                                }}
-                                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-all cursor-pointer ${
-                                  activeTab === 'um-telecom'
-                                    ? 'bg-zinc-900 text-white font-bold'
-                                    : 'hover:bg-zinc-900/30 text-zinc-404 hover:text-white'
-                                }`}
-                              >
-                                <Zap className={`h-4 w-4 shrink-0 ${activeTab === 'um-telecom' ? 'text-brand' : 'text-zinc-550'}`} />
-                                <span className="text-xs">Um Telecom</span>
-                              </button>
-
-                              {/* Implantação Starlink (Direct option) */}
-                              <button
-                                onClick={() => {
-                                  setActiveTab('starlink');
-                                  setIsMobileSidebarOpen(false);
-                                }}
-                                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-all cursor-pointer ${
-                                  activeTab === 'starlink'
-                                    ? 'bg-zinc-900 text-white font-bold'
-                                    : 'hover:bg-zinc-900/30 text-zinc-404 hover:text-white'
-                                }`}
-                              >
-                                <Globe className={`h-4 w-4 shrink-0 ${activeTab === 'starlink' ? 'text-brand' : 'text-zinc-550'}`} />
-                                <span className="text-xs">Starlink</span>
-                              </button>
-
-                              {/* Vectra (Direct option) */}
-                              <button
-                                onClick={() => {
-                                  setActiveTab('vectra');
-                                  setIsMobileSidebarOpen(false);
-                                }}
-                                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-all cursor-pointer ${
-                                  activeTab === 'vectra'
-                                    ? 'bg-zinc-900 text-white font-bold'
-                                    : 'hover:bg-zinc-900/30 text-zinc-404 hover:text-white'
-                                }`}
-                              >
-                                <Network className={`h-4 w-4 shrink-0 ${activeTab === 'vectra' ? 'text-brand' : 'text-zinc-550'}`} />
-                                <span className="text-xs flex items-center justify-between w-full">
-                                  <span>Vectra</span>
-                                  <span className="text-[8px] bg-amber-500/10 text-amber-500 dark:text-amber-400 dark:bg-amber-500/15 px-1 py-0.5 rounded font-sans uppercase font-bold">Homolog.</span>
-                                </span>
-                              </button>
-                            </motion.div>
+                              <LayoutDashboard className={`h-4.5 w-4.5 shrink-0 ${activeTab === 'dashboard' ? 'text-brand' : 'text-zinc-500'}`} />
+                              <span className="text-xs">Painel Gerencial</span>
+                            </button>
                           )}
-                        </AnimatePresence>
-                      </div>
+
+                          {/* Faturamento PEII (Collapsible Menu Level 1) */}
+                          {(isScreenAllowed('contratos') || isScreenAllowed('contact-center') || isScreenAllowed('um-telecom') || isScreenAllowed('starlink') || isScreenAllowed('vectra')) && (
+                            <div className="space-y-1">
+                              <button
+                                onClick={() => setFaturamentoPeiiOpen(!faturamentoPeiiOpen)}
+                                className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-all hover:bg-zinc-900/40 text-zinc-400 hover:text-white cursor-pointer"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <TableProperties className="h-4.5 w-4.5 shrink-0 text-zinc-500" />
+                                  <span className="text-xs">Faturamento PEII</span>
+                                </div>
+                                {faturamentoPeiiOpen ? (
+                                  <ChevronDown className="h-3.5 w-3.5 text-zinc-500" />
+                                ) : (
+                                  <ChevronRight className="h-3.5 w-3.5 text-zinc-500" />
+                                )}
+                              </button>
+
+                              <AnimatePresence initial={false}>
+                                {faturamentoPeiiOpen && (
+                                  <motion.div 
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: "auto", opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                                    className="overflow-hidden pl-4 ml-2 border-l border-zinc-800 space-y-1.5 py-1"
+                                  >
+                                    {isScreenAllowed('contratos') && (
+                                      <button
+                                        onClick={() => {
+                                          setActiveTab('contratos');
+                                          setIsMobileSidebarOpen(false);
+                                        }}
+                                        className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-all cursor-pointer ${
+                                          activeTab === 'contratos'
+                                            ? 'bg-zinc-900 text-white font-bold'
+                                            : 'hover:bg-zinc-900/30 text-zinc-404 hover:text-white'
+                                        }`}
+                                      >
+                                        <Phone className={`h-4 w-4 shrink-0 ${activeTab === 'contratos' ? 'text-brand' : 'text-zinc-550'}`} />
+                                        <span className="text-xs">Ponto de Voz Fixo</span>
+                                      </button>
+                                    )}
+
+                                    {isScreenAllowed('contact-center') && (
+                                      <button
+                                        onClick={() => {
+                                          setActiveTab('contact-center');
+                                          setIsMobileSidebarOpen(false);
+                                        }}
+                                        className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-all cursor-pointer ${
+                                          activeTab === 'contact-center'
+                                            ? 'bg-zinc-900 text-white font-bold'
+                                            : 'hover:bg-zinc-900/30 text-zinc-404 hover:text-white'
+                                        }`}
+                                      >
+                                        <Headset className={`h-4 w-4 shrink-0 ${activeTab === 'contact-center' ? 'text-brand' : 'text-zinc-550'}`} />
+                                        <span className="text-xs">Contact Center</span>
+                                      </button>
+                                    )}
+
+                                    {isScreenAllowed('um-telecom') && (
+                                      <button
+                                        onClick={() => {
+                                          setActiveTab('um-telecom');
+                                          setIsMobileSidebarOpen(false);
+                                        }}
+                                        className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-all cursor-pointer ${
+                                          activeTab === 'um-telecom'
+                                            ? 'bg-zinc-900 text-white font-bold'
+                                            : 'hover:bg-zinc-900/30 text-zinc-404 hover:text-white'
+                                        }`}
+                                      >
+                                        <Zap className={`h-4 w-4 shrink-0 ${activeTab === 'um-telecom' ? 'text-brand' : 'text-zinc-550'}`} />
+                                        <span className="text-xs">Um Telecom</span>
+                                      </button>
+                                    )}
+
+                                    {isScreenAllowed('starlink') && (
+                                      <button
+                                        onClick={() => {
+                                          setActiveTab('starlink');
+                                          setIsMobileSidebarOpen(false);
+                                        }}
+                                        className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-all cursor-pointer ${
+                                          activeTab === 'starlink'
+                                            ? 'bg-zinc-900 text-white font-bold'
+                                            : 'hover:bg-zinc-900/30 text-zinc-404 hover:text-white'
+                                        }`}
+                                      >
+                                        <Globe className={`h-4 w-4 shrink-0 ${activeTab === 'starlink' ? 'text-brand' : 'text-zinc-550'}`} />
+                                        <span className="text-xs">Starlink</span>
+                                      </button>
+                                    )}
+
+                                    {isScreenAllowed('vectra') && (
+                                      <button
+                                        onClick={() => {
+                                          setActiveTab('vectra');
+                                          setIsMobileSidebarOpen(false);
+                                        }}
+                                        className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-all cursor-pointer ${
+                                          activeTab === 'vectra'
+                                            ? 'bg-zinc-900 text-white font-bold'
+                                            : 'hover:bg-zinc-900/30 text-zinc-404 hover:text-white'
+                                        }`}
+                                      >
+                                        <Network className={`h-4 w-4 shrink-0 ${activeTab === 'vectra' ? 'text-brand' : 'text-zinc-550'}`} />
+                                        <span className="text-xs flex items-center justify-between w-full">
+                                          <span>Vectra</span>
+                                          <span className="text-[8px] bg-amber-500/10 text-amber-500 dark:text-amber-400 dark:bg-amber-500/15 px-1 py-0.5 rounded font-sans uppercase font-bold">Homolog.</span>
+                                        </span>
+                                      </button>
+                                    )}
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </div>
+                          )}
+
+                          {/* Fornecedores & LPU (Mobile Collapsible) */}
+                          {(isScreenAllowed('parceiros') || isScreenAllowed('lpu') || isScreenAllowed('atividades')) && (
+                            <div className="space-y-1">
+                              <button
+                                onClick={() => setFornecedoresOpen(!fornecedoresOpen)}
+                                className="w-full flex items-center justify-between px-3 py-3 rounded-xl text-left transition-all hover:bg-zinc-900/40 text-zinc-400 hover:text-white cursor-pointer"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <Building2 className="h-4.5 w-4.5 shrink-0 text-zinc-500" />
+                                  <span className="text-xs">Fornecedores & LPU</span>
+                                </div>
+                                {fornecedoresOpen ? (
+                                  <ChevronDown className="h-3.5 w-3.5 text-zinc-500" />
+                                ) : (
+                                  <ChevronRight className="h-3.5 w-3.5 text-zinc-500" />
+                                )}
+                              </button>
+
+                              <AnimatePresence initial={false}>
+                                {fornecedoresOpen && (
+                                  <motion.div
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: "auto", opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    transition={{ duration: 0.2 }}
+                                    className="overflow-hidden pl-4 ml-2.5 border-l border-zinc-800 space-y-1.5 py-1"
+                                  >
+                                    {isScreenAllowed('parceiros') && (
+                                      <button
+                                        onClick={() => {
+                                          setActiveTab('parceiros');
+                                          setIsMobileSidebarOpen(false);
+                                        }}
+                                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all cursor-pointer ${
+                                          activeTab === 'parceiros'
+                                            ? 'bg-zinc-900 text-white font-bold'
+                                            : 'hover:bg-zinc-900/40 text-zinc-404 hover:text-white'
+                                        }`}
+                                      >
+                                        <Users className={`h-4 w-4 shrink-0 ${activeTab === 'parceiros' ? 'text-brand' : 'text-zinc-500'}`} />
+                                        <span className="text-xs">Parceiros</span>
+                                      </button>
+                                    )}
+
+                                    {isScreenAllowed('lpu') && (
+                                      <button
+                                        onClick={() => {
+                                          setIsMobileSidebarOpen(false);
+                                          setActiveTab('lpu');
+                                        }}
+                                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all cursor-pointer ${
+                                          activeTab === 'lpu'
+                                            ? 'bg-zinc-900 text-white font-bold'
+                                            : 'hover:bg-zinc-900/40 text-zinc-404 hover:text-white'
+                                        }`}
+                                      >
+                                        <TrendingUp className={`h-4 w-4 shrink-0 ${activeTab === 'lpu' ? 'text-brand' : 'text-zinc-500'}`} />
+                                        <span className="text-xs">LPU de Serviços</span>
+                                      </button>
+                                    )}
+
+                                    {isScreenAllowed('atividades') && (
+                                      <button
+                                        onClick={() => {
+                                          setIsMobileSidebarOpen(false);
+                                          setActiveTab('atividades');
+                                        }}
+                                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all cursor-pointer ${
+                                          activeTab === 'atividades'
+                                            ? 'bg-zinc-900 text-white font-bold'
+                                            : 'hover:bg-zinc-900/40 text-zinc-550 hover:text-white'
+                                        }`}
+                                      >
+                                        <Activity className={`h-4 w-4 shrink-0 ${activeTab === 'atividades' ? 'text-brand' : 'text-zinc-550'}`} />
+                                        <span className="text-xs">Atividades</span>
+                                      </button>
+                                    )}
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </div>
+                          )}
+                        </>
+                      )}
 
                       {/* Usuários */}
-                      {user && user.role === 'admin' && (
+                      {isScreenAllowed('usuarios') && (
                         <button
                           onClick={() => {
                             setActiveTab('usuarios');
@@ -1069,7 +1426,7 @@ export default function App() {
                       {user.email}
                     </span>
                     <span className="inline-block mt-1 text-[8px] font-black uppercase tracking-wider px-1.5 py-0.2 bg-zinc-800 text-zinc-404 border border-zinc-700/50 rounded font-mono">
-                      {user.role}
+                      {getRoleLabel(user.role)}
                     </span>
                   </div>
                 </div>
@@ -1146,7 +1503,7 @@ export default function App() {
               transition={{ duration: 0.18, ease: "easeOut" }}
               className="space-y-6"
             >
-              {activeTab === 'dashboard' && <Dashboard contracts={visibleContracts} prices={prices} user={user} />}
+              {activeTab === 'dashboard' && user?.role !== 'parceiro' && <Dashboard contracts={visibleContracts} prices={prices} user={user} />}
               {activeTab === 'contratos' && (
                 <ContractTable
                   contracts={visibleContracts}
@@ -1161,8 +1518,20 @@ export default function App() {
                 <UserManagement currentUser={user} />
               )}
               
+              {activeTab === 'parceiros' && (
+                <SuppliersManagement currentUser={user} activeSection="parceiros" />
+              )}
+              
+              {activeTab === 'lpu' && (
+                <SuppliersManagement currentUser={user} activeSection="lpu" />
+              )}
+
+              {activeTab === 'atividades' && (
+                <AtividadesManagement currentUser={user} />
+              )}
+              
               {activeTab === 'contact-center' && (
-                <ContactCenterBilling />
+                <ContactCenterBilling user={user} />
               )}
 
               {activeTab === 'um-telecom' && (
