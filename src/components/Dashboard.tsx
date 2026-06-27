@@ -2252,7 +2252,7 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
                     return null;
                   }}
                 />
-                <Bar dataKey="Faturamento (R$)" fill="#10b981" radius={[6, 6, 0, 0]}>
+                <Bar dataKey="Faturamento (R$)" fill="#10b981" radius={[6, 6, 0, 0]} isAnimationActive={false}>
                   {secretaryTotalsData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
@@ -2343,7 +2343,7 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
                     return null;
                   }}
                 />
-                <Bar dataKey="Faturamento (R$)" fill="#6366f1" radius={[6, 6, 0, 0]}>
+                <Bar dataKey="Faturamento (R$)" fill="#6366f1" radius={[6, 6, 0, 0]} isAnimationActive={false}>
                   {monthlyBillingData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[(index + 1) % COLORS.length]} />
                   ))}
@@ -2442,7 +2442,7 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
                     return null;
                   }}
                 />
-                <Bar dataKey="Faturamento Geral (R$)" fill="#0d9488" radius={[6, 6, 0, 0]}>
+                <Bar dataKey="Faturamento Geral (R$)" fill="#0d9488" radius={[6, 6, 0, 0]} isAnimationActive={false}>
                   {monthlyBillingData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[(index + 3) % COLORS.length]} />
                   ))}
