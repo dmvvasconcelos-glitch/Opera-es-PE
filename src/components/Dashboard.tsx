@@ -6,8 +6,8 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { Contract, PvfPrices, PvfKey, UserSession } from '../types';
 import { PVF_LABELS, getContractPvfTotal, getContractValue, formatCurrency } from '../data';
-import { collection, getDocs, query, orderBy, onSnapshot, doc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { collection, query, orderBy, doc } from 'firebase/firestore';
+import { db, getDocs, onSnapshot } from '../firebase';
 import { 
   BarChart, 
   Bar, 
@@ -52,6 +52,7 @@ import {
   Headset,
   AlertCircle
 } from 'lucide-react';
+import { useCurrentMonthFilter, getAvailableMonths, isUnseededMonth } from '../utils/monthUtils';
 
 interface DashboardProps {
   contracts: Contract[];
@@ -191,7 +192,7 @@ const generateMockVectraRecords = () => {
       protocol: String(3400000 + i),
       location: `Gerência Regional ${['Recife Centro', 'Agreste Caruaru', 'Sertão Petrolina', 'Zona da Mata Goiana'][i % 4]}`,
       description: 'Varredura e manutenção corretiva de firewall de segurança de borda UTM',
-      category: 'utm',
+      category: 'wifi',
       solution: 'Revisão das regras NAT, aplicação de patch de segurança contra vulnerabilidades e carga de firmware'
     });
   }
@@ -297,7 +298,7 @@ const PRESEEDED_CONTACT_CENTER: ContactCenterOS[] = [
 
 export default function Dashboard({ contracts, prices, user }: DashboardProps) {
   // Reference Month state for consolidated calculations
-  const [referenceMonth, setReferenceMonth] = useState('Junho/2026');
+  const [referenceMonth, setReferenceMonth] = useCurrentMonthFilter();
   const [dbUmRecords, setDbUmRecords] = useState<any[]>(() => {
     try {
       const cached = localStorage.getItem('umTelecom_offline_records');
@@ -346,10 +347,10 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
       if (cached) return JSON.parse(cached);
     } catch (e) {}
     return {
-      limitWifi: 63,
-      baseCostWifi: 0.0,
-      excedenteWifi: 0.0,
-      limitUtm: 74,
+      limitWifi: 60,
+      baseCostWifi: 39400.20,
+      excedenteWifi: 590.00,
+      limitUtm: 0,
       baseCostUtm: 0.0,
       excedenteUtm: 0.0
     };
@@ -390,6 +391,10 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
       localStorage.setItem('dashboard_activities_cache', JSON.stringify(list));
     }, (err) => {
       console.error("Erro ao sincronizar atividades no dashboard:", err);
+      const cached = localStorage.getItem('dashboard_activities_cache');
+      if (cached) {
+        setDbActivities(JSON.parse(cached));
+      }
     });
     return () => unsub();
   }, []);
@@ -453,14 +458,7 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
 
   // Compute active contratos for selected reference month in dashboard (matching the ContractTable logic)
   const isZeroMonthSelected = referenceMonth === 'Janeiro/2026' || referenceMonth === 'Fevereiro/2026';
-  const isFutureMonth = [
-    'Julho/2026',
-    'Agosto/2026',
-    'Setembro/2026',
-    'Outubro/2026',
-    'Novembro/2026',
-    'Dezembro/2026'
-  ].includes(referenceMonth);
+  const isFutureMonth = isUnseededMonth(referenceMonth);
 
   const activeContractsForMonth = useMemo(() => {
     if (isZeroMonthSelected) return [];
@@ -696,7 +694,12 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
       }
     }, (error) => {
       console.error("Dashboard error on snapshot for systemPrices/contactCenter:", error);
-      setCcPrices(DEFAULT_CC_PRICES);
+      const cached = localStorage.getItem('cc_prices_cache');
+      if (cached) {
+        setCcPrices(JSON.parse(cached));
+      } else {
+        setCcPrices(DEFAULT_CC_PRICES);
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -707,11 +710,19 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
     const unsubscribe = onSnapshot(pricesDocRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
+        let limitWifiVal = Number(data.limitWifi ?? 60);
+        let baseCostWifiVal = Number(data.baseCostWifi ?? 39400.20);
+        let excedenteWifiVal = Number(data.excedenteWifi ?? 590.00);
+
+        if (limitWifiVal === 63) limitWifiVal = 60;
+        if (baseCostWifiVal === 0.0) baseCostWifiVal = 39400.20;
+        if (excedenteWifiVal === 0.0) excedenteWifiVal = 590.00;
+
         const pObj = {
-          limitWifi: Number(data.limitWifi ?? 63),
-          baseCostWifi: Number(data.baseCostWifi ?? 0.0),
-          excedenteWifi: Number(data.excedenteWifi ?? 0.0),
-          limitUtm: Number(data.limitUtm ?? 74),
+          limitWifi: limitWifiVal,
+          baseCostWifi: baseCostWifiVal,
+          excedenteWifi: excedenteWifiVal,
+          limitUtm: Number(data.limitUtm ?? 0),
           baseCostUtm: Number(data.baseCostUtm ?? 0.0),
           excedenteUtm: Number(data.excedenteUtm ?? 0.0)
         };
@@ -720,6 +731,10 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
       }
     }, (error) => {
       console.error("Dashboard error on snapshot for systemPrices/vectra:", error);
+      const cached = localStorage.getItem('vectra_prices_cache');
+      if (cached) {
+        setVectraPrices(JSON.parse(cached));
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -1044,24 +1059,22 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
     const isVectraSeeded = localStorage.getItem('vectra_seeded_v1') === 'true';
     const records = (dbVectraRecords.length > 0 || isVectraSeeded) ? dbVectraRecords : generateMockVectraRecords();
     const monthRecords = records.filter((r: any) => r.referenceMonth === referenceMonth);
-    const wifiCount = monthRecords.filter((r: any) => r.category === 'wifi').length;
-    const utmCount = monthRecords.filter((r: any) => r.category === 'utm').length;
+    const totalCount = monthRecords.length;
     
-    const excessWifi = Math.max(0, wifiCount - vectraPrices.limitWifi);
-    const excessUtm = Math.max(0, utmCount - vectraPrices.limitUtm);
+    const limitCombined = Number(vectraPrices.limitWifi ?? 60);
+    const baseCostCombined = Number(vectraPrices.baseCostWifi ?? 39400.20);
+    const excedenteCombined = Number(vectraPrices.excedenteWifi ?? 590.00);
     
-    const wifiCost = vectraPrices.baseCostWifi + excessWifi * vectraPrices.excedenteWifi;
-    const utmCost = vectraPrices.baseCostUtm + excessUtm * vectraPrices.excedenteUtm;
-    
-    const grandTotal = wifiCost + utmCost;
+    const excessWifi = Math.max(0, totalCount - limitCombined);
+    const grandTotal = baseCostCombined + excessWifi * excedenteCombined;
     
     return {
       grandTotal,
-      wifiCount,
-      utmCount,
+      wifiCount: totalCount,
+      utmCount: 0,
       excessWifi,
-      excessUtm,
-      totalCount: monthRecords.length
+      excessUtm: 0,
+      totalCount
     };
   }, [dbVectraRecords, referenceMonth, isZeroMonthSelected, vectraPrices]);
 
@@ -1120,10 +1133,7 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
     }
     const currentVal = totalCcBilling;
     
-    const availableMonths = [
-      'Janeiro/2026', 'Fevereiro/2026', 'Março/2026', 'Abril/2026', 'Maio/2026', 'Junho/2026',
-      'Julho/2026', 'Agosto/2026', 'Setembro/2026', 'Outubro/2026', 'Novembro/2026', 'Dezembro/2026'
-    ];
+    const availableMonths = getAvailableMonths();
     const currentIndex = availableMonths.indexOf(referenceMonth);
     const previousMonthStr = currentIndex > 0 ? availableMonths[currentIndex - 1] : '';
 
@@ -1250,16 +1260,14 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
         const isVectraSeeded = localStorage.getItem('vectra_seeded_v1') === 'true';
         const records = (dbVectraRecords.length > 0 || isVectraSeeded) ? dbVectraRecords : generateMockVectraRecords();
         const monthRecords = records.filter((r: any) => r.referenceMonth === refMonth);
-        const wifiCount = monthRecords.filter((r: any) => r.category === 'wifi').length;
-        const utmCount = monthRecords.filter((r: any) => r.category === 'utm').length;
+        const totalCount = monthRecords.length;
         
-        const excessWifi = Math.max(0, wifiCount - vectraPrices.limitWifi);
-        const excessUtm = Math.max(0, utmCount - vectraPrices.limitUtm);
+        const limitCombined = Number(vectraPrices.limitWifi ?? 60);
+        const baseCostCombined = Number(vectraPrices.baseCostWifi ?? 39400.20);
+        const excedenteCombined = Number(vectraPrices.excedenteWifi ?? 590.00);
         
-        const wifiCost = vectraPrices.baseCostWifi + excessWifi * vectraPrices.excedenteWifi;
-        const utmCost = vectraPrices.baseCostUtm + excessUtm * vectraPrices.excedenteUtm;
-        
-        vectraTotal = wifiCost + utmCost;
+        const excessWifi = Math.max(0, totalCount - limitCombined);
+        vectraTotal = baseCostCombined + excessWifi * excedenteCombined;
       } catch {
         vectraTotal = 0;
       }
@@ -1573,10 +1581,7 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
               onChange={(e) => setReferenceMonth(e.target.value)}
               className="bg-transparent text-xs font-black text-zinc-800 dark:text-white focus:outline-none cursor-pointer pr-3 outline-none"
             >
-              {[
-                'Janeiro/2026', 'Fevereiro/2026', 'Março/2026', 'Abril/2026', 'Maio/2026', 'Junho/2026',
-                'Julho/2026', 'Agosto/2026', 'Setembro/2026', 'Outubro/2026', 'Novembro/2026', 'Dezembro/2026'
-              ].map(m => (
+              {getAvailableMonths().map(m => (
                 <option key={m} value={m} className="bg-white dark:bg-zinc-900 text-zinc-800 dark:text-white font-bold">{m}</option>
               ))}
             </select>
@@ -2140,27 +2145,15 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
 
               <div className="border-t border-zinc-105 dark:border-zinc-800/65 pt-3 flex flex-col gap-1.5 font-mono text-[10.5px]">
                 <div className="flex items-center justify-between text-zinc-500">
-                  <span>Chamados PA Wifi:</span>
+                  <span>Chamados Wifi/UTM:</span>
                   <span className="text-zinc-800 dark:text-white font-bold">
                     {vectraStats.wifiCount} / {vectraPrices.limitWifi} ch
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-zinc-500">
-                  <span>Excedentes PA Wifi:</span>
+                  <span>Excedentes Wifi/UTM:</span>
                   <span className="text-zinc-800 dark:text-white font-bold">
                     {vectraStats.excessWifi > 0 ? `+${vectraStats.excessWifi} ch` : 'Nenhum'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-zinc-500">
-                  <span>Chamados Manut UTM:</span>
-                  <span className="text-zinc-800 dark:text-white font-bold">
-                    {vectraStats.utmCount} / {vectraPrices.limitUtm} ch
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-zinc-505">
-                  <span>Excedentes UTM:</span>
-                  <span className="text-[#B6202F] dark:text-[#B6202F] font-bold">
-                    {vectraStats.excessUtm > 0 ? `+${vectraStats.excessUtm} ch` : 'Nenhum'}
                   </span>
                 </div>
               </div>

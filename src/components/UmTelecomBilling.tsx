@@ -19,12 +19,15 @@ import {
   Edit,
   X,
   FileSpreadsheet,
-  Search
+  Search,
+  ShieldAlert
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
-import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, doc, setDoc, deleteDoc, onSnapshot, getDoc, writeBatch } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType, onSnapshot, getDoc, setDoc, deleteDoc, writeBatch } from '../firebase';
+import { collection, doc } from 'firebase/firestore';
+import { UserSession } from '../types';
+import { useCurrentMonthFilter, getCurrentMonth, getAvailableMonths } from '../utils/monthUtils';
 
 interface UmTelecomRecord {
   id: string;
@@ -117,8 +120,24 @@ const PRESEEDED_RECORDS: UmTelecomRecord[] = [
   }
 ];
 
-export default function UmTelecomBilling() {
-  const [referenceMonth, setReferenceMonth] = useState('Junho/2026');
+export default function UmTelecomBilling({ user }: { user?: UserSession | null }) {
+  if (!user || (user.role !== 'admin' && user.role !== 'editor' && user.role !== 'viewer' && !user.allowedScreens?.includes('um-telecom'))) {
+    return (
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-8 text-center space-y-4 max-w-md mx-auto my-12 shadow-xs">
+        <div className="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center mx-auto">
+          <ShieldAlert className="h-6 w-6" />
+        </div>
+        <div className="space-y-1.5">
+          <h3 className="text-lg font-black text-zinc-900 dark:text-white font-sans tracking-tight">Acesso Não Autorizado</h3>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 font-sans font-medium leading-relaxed">
+            Seu perfil de usuário ({user?.role || 'convidado'}) não possui permissão para visualizar estas faturas e relatórios confidenciais de telecomunicações corporativas.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const [referenceMonth, setReferenceMonth] = useCurrentMonthFilter();
   const [dbRecords, setDbRecords] = useState<UmTelecomRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
@@ -141,7 +160,7 @@ export default function UmTelecomBilling() {
   const [formLocation, setFormLocation] = useState('');
   const [formNotes, setFormNotes] = useState('');
   const [formSolution, setFormSolution] = useState('');
-  const [formReferenceMonth, setFormReferenceMonth] = useState('Junho/2026');
+  const [formReferenceMonth, setFormReferenceMonth] = useState(getCurrentMonth);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
   const [deleteRecordId, setDeleteRecordId] = useState<string | null>(null);
   
@@ -175,6 +194,13 @@ export default function UmTelecomBilling() {
           return;
         }
 
+        if (localStorage.getItem('umtelecom_seeded_v1') === 'true') {
+          console.log("Database cleared of Um Telecom records by preference, skipping automatic seeding.");
+          setDbRecords([]);
+          setIsLoading(false);
+          return;
+        }
+
         let isAlreadySeededDB = false;
         try {
           const seedMetaDoc = await getDoc(doc(db, 'test', 'seeding_metadata'));
@@ -185,7 +211,7 @@ export default function UmTelecomBilling() {
           console.warn("Could not retrieve remote seeding metadata for Um Telecom:", smErr);
         }
 
-        if (isAlreadySeededDB || localStorage.getItem('umtelecom_seeded_v1') === 'true') {
+        if (isAlreadySeededDB) {
           console.log("Database cleared of Um Telecom records by preference, skipping automatic seeding.");
           setDbRecords([]);
           setIsLoading(false);
@@ -194,6 +220,7 @@ export default function UmTelecomBilling() {
         }
         console.log("Sem registros do Um Telecom no banco de dados, populando conjunto padrão do Um Telecom...");
         try {
+          localStorage.setItem('umtelecom_seeded_v1', 'true');
           // Seed the PRESEEDED_RECORDS to Firestore if there are no records yet
           const batch = writeBatch(db);
           PRESEEDED_RECORDS.forEach((item) => {
@@ -205,7 +232,6 @@ export default function UmTelecomBilling() {
           batch.set(seedMetaRef, { umtelecom: true }, { merge: true });
 
           await batch.commit();
-          localStorage.setItem('umtelecom_seeded_v1', 'true');
           return;
         } catch (writeErr) {
           console.error("Falha ao injetar chamados padrões do Um Telecom no Firestore:", writeErr);
@@ -247,20 +273,7 @@ export default function UmTelecomBilling() {
   }, [referenceMonth, editingRecordId]);
 
   // Months lists
-  const availableMonths = [
-    'Janeiro/2026',
-    'Fevereiro/2026',
-    'Março/2026',
-    'Abril/2026',
-    'Maio/2026',
-    'Junho/2026',
-    'Julho/2026',
-    'Agosto/2026',
-    'Setembro/2026',
-    'Outubro/2026',
-    'Novembro/2026',
-    'Dezembro/2026'
-  ];
+  const availableMonths = getAvailableMonths();
 
   // Records filtered for current reference month loaded cleanly from Firestore
   const activeRecords = useMemo(() => {

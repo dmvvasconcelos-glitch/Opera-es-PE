@@ -7,8 +7,8 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { jsPDF } from 'jspdf';
 import { Contract, PvfPrices, PvfKey, UserSession } from '../types';
 import { PVF_LABELS, getContractPvfTotal, getContractValue, formatCurrency } from '../data';
-import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, doc, setDoc, deleteDoc, onSnapshot, serverTimestamp, getDocs } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType, onSnapshot, getDocs } from '../firebase';
+import { collection, doc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { 
   Search, 
   Filter, 
@@ -41,6 +41,7 @@ import {
   Building2,
   DollarSign
 } from 'lucide-react';
+import { useCurrentMonthFilter, getCurrentMonth, getPreviousMonth, getAvailableMonths, isUnseededMonth } from '../utils/monthUtils';
 
 const mapMonthToAscii = (month: string) => {
   return month
@@ -114,41 +115,21 @@ export default function ContractTable({
   const [deleteConfirmContract, setDeleteConfirmContract] = useState<Contract | null>(null);
 
   // Month Selection and Syncing
-  const [referenceMonth, setReferenceMonth] = useState('Junho/2026');
+  const [referenceMonth, setReferenceMonth] = useCurrentMonthFilter();
   const [dbPvfRecords, setDbPvfRecords] = useState<Contract[]>([]);
   const isZeroMonthSelected = referenceMonth === 'Janeiro/2026' || referenceMonth === 'Fevereiro/2026';
 
   // Month replication states
   const [showReplicateModal, setShowReplicateModal] = useState(false);
-  const [replicateSourceMonth, setReplicateSourceMonth] = useState('Maio/2026');
-  const [replicateTargetMonth, setReplicateTargetMonth] = useState('Junho/2026');
+  const [replicateSourceMonth, setReplicateSourceMonth] = useState(getPreviousMonth);
+  const [replicateTargetMonth, setReplicateTargetMonth] = useState(getCurrentMonth);
   const [isReplicating, setIsReplicating] = useState(false);
 
-  const availableMonths = [
-    'Janeiro/2026',
-    'Fevereiro/2026',
-    'Março/2026',
-    'Abril/2026',
-    'Maio/2026',
-    'Junho/2026',
-    'Julho/2026',
-    'Agosto/2026',
-    'Setembro/2026',
-    'Outubro/2026',
-    'Novembro/2026',
-    'Dezembro/2026'
-  ];
+  const availableMonths = getAvailableMonths();
 
   // Snapshot Saving States in Firebase
   const [showSaveSnapshotModal, setShowSaveSnapshotModal] = useState(false);
-  const [selectedRefMonth, setSelectedRefMonth] = useState(() => {
-    const months = [
-      'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
-    ];
-    const now = new Date();
-    return `${months[now.getMonth()]}/${now.getFullYear()}`;
-  });
+  const [selectedRefMonth, setSelectedRefMonth] = useState(getCurrentMonth);
   const [saverName, setSaverName] = useState(user?.displayName || '');
   const [savingSnapshot, setSavingSnapshot] = useState(false);
   const [saveSnapshotError, setSaveSnapshotError] = useState<string | null>(null);
@@ -1657,7 +1638,7 @@ export default function ContractTable({
                   if (idx > 0) {
                     setReplicateSourceMonth(availableMonths[idx - 1]);
                   } else {
-                    setReplicateSourceMonth('Maio/2026');
+                    setReplicateSourceMonth(getPreviousMonth(referenceMonth));
                   }
                   setReplicateTargetMonth(referenceMonth);
                   setShowReplicateModal(true);
@@ -1820,9 +1801,9 @@ export default function ContractTable({
                 <tr>
                   <td colSpan={16} className="text-center p-12 text-zinc-400 dark:text-zinc-650 italic">
                     <p className="flex justify-center mb-2"><AlertCircle className="h-8 w-8 text-zinc-300" /></p>
-                    {['Julho/2026', 'Agosto/2026', 'Setembro/2026', 'Outubro/2026', 'Novembro/2026', 'Dezembro/2026'].includes(referenceMonth) ? (
+                    {isUnseededMonth(referenceMonth) ? (
                       <div>
-                        <p className="font-bold text-zinc-600 dark:text-zinc-300 not-italic text-sm">Nenhum dado cadastrado para este mês futuro.</p>
+                        <p className="font-bold text-zinc-600 dark:text-zinc-300 not-italic text-sm">Nenhum dado cadastrado para este mês de referência.</p>
                         <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1">Utilize o botão <strong className="text-emerald-600 dark:text-emerald-400 font-extrabold font-sans">"Replicar Mês"</strong> no topo para importar a tabela faturamento de outro mês de referência.</p>
                       </div>
                     ) : (
@@ -2248,7 +2229,7 @@ export default function ContractTable({
             </button>
             
             <div className="flex items-center gap-1 font-medium font-mono text-zinc-650 px-2">
-              Pág. <span className="text-zinc-900 dark:text-zinc-150">{currentPage}</span> / {totalPages}
+              Pág. <span className="text-zinc-900 dark:text-zinc-200">{currentPage}</span> / {totalPages}
             </div>
 
             <button
@@ -2304,7 +2285,7 @@ export default function ContractTable({
                     value={formContractKey}
                     onChange={(e) => setFormContractKey(e.target.value)}
                     required
-                    className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800/80 px-3 py-2 rounded-xl text-xs text-zinc-800 dark:text-zinc-150 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800/80 px-3 py-2 rounded-xl text-xs text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                   />
                 </div>
 
@@ -2318,7 +2299,7 @@ export default function ContractTable({
                     value={formSecretaria}
                     onChange={(e) => setFormSecretaria(e.target.value)}
                     required
-                    className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800/80 px-3 py-2 rounded-xl text-xs text-zinc-800 dark:text-zinc-150 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800/80 px-3 py-2 rounded-xl text-xs text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                   />
                 </div>
 
@@ -2329,7 +2310,7 @@ export default function ContractTable({
                   <select
                     value={formStatus}
                     onChange={(e) => setFormStatus(e.target.value as any)}
-                    className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800/80 px-3 py-2 rounded-xl text-xs text-zinc-805 dark:text-zinc-150 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800/80 px-3 py-2 rounded-xl text-xs text-zinc-805 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                   >
                     <option value="Ativo">🟢 Ativo</option>
                     <option value="Suspenso">🟡 Suspenso</option>
@@ -2369,7 +2350,7 @@ export default function ContractTable({
                               [key]: isNaN(val) ? 0 : val
                             }));
                           }}
-                          className="w-full bg-transparent border-none text-xs font-mono font-semibold focus:outline-none text-zinc-800 dark:text-zinc-150 placeholder-zinc-300"
+                          className="w-full bg-transparent border-none text-xs font-mono font-semibold focus:outline-none text-zinc-800 dark:text-zinc-200 placeholder-zinc-300"
                         />
                       </div>
                     );
@@ -2386,7 +2367,7 @@ export default function ContractTable({
                   placeholder="Informações adicionais, prazos ou pendências administrativas..."
                   value={formObservacoes}
                   onChange={(e) => setFormObservacoes(e.target.value)}
-                  className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800/80 px-3 py-2 rounded-xl text-xs text-zinc-800 dark:text-zinc-150 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800/80 px-3 py-2 rounded-xl text-xs text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
 

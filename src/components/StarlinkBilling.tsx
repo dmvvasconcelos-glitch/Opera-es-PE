@@ -20,12 +20,15 @@ import {
   Info,
   Wrench,
   Wifi,
-  FileSpreadsheet
+  FileSpreadsheet,
+  ShieldAlert
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
-import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, doc, setDoc, deleteDoc, onSnapshot, getDoc, writeBatch } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType, onSnapshot, getDoc, setDoc, deleteDoc, writeBatch } from '../firebase';
+import { collection, doc } from 'firebase/firestore';
+import { UserSession } from '../types';
+import { useCurrentMonthFilter, getCurrentMonth, getAvailableMonths } from '../utils/monthUtils';
 
 interface StarlinkOS {
   id: string;
@@ -87,8 +90,24 @@ const PRESEEDED_STARLINK_RECORDS: StarlinkOS[] = [
   }
 ];
 
-export default function StarlinkBilling() {
-  const [referenceMonth, setReferenceMonth] = useState('Junho/2026');
+export default function StarlinkBilling({ user }: { user?: UserSession | null }) {
+  if (!user || (user.role !== 'admin' && user.role !== 'editor' && user.role !== 'viewer' && !user.allowedScreens?.includes('starlink'))) {
+    return (
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-8 text-center space-y-4 max-w-md mx-auto my-12 shadow-xs">
+        <div className="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center mx-auto">
+          <ShieldAlert className="h-6 w-6" />
+        </div>
+        <div className="space-y-1.5">
+          <h3 className="text-lg font-black text-zinc-900 dark:text-white font-sans tracking-tight">Acesso Não Autorizado</h3>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 font-sans font-medium leading-relaxed">
+            Seu perfil de usuário ({user?.role || 'convidado'}) não possui permissão para visualizar estas faturas e relatórios confidenciais de telecomunicações corporativas.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const [referenceMonth, setReferenceMonth] = useCurrentMonthFilter();
   const isZeroMonthSelected = referenceMonth === 'Janeiro/2026' || referenceMonth === 'Fevereiro/2026';
   const [records, setRecords] = useState<StarlinkOS[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -109,7 +128,7 @@ export default function StarlinkBilling() {
   const [formLocation, setFormLocation] = useState('');
   const [formDescription, setFormDescription] = useState('');
   const [formSolution, setFormSolution] = useState<'Interior' | 'Noronha' | 'Ativação PCM'>('Interior');
-  const [formReferenceMonth, setFormReferenceMonth] = useState('Junho/2026');
+  const [formReferenceMonth, setFormReferenceMonth] = useState(getCurrentMonth);
   const [formBillingValue, setFormBillingValue] = useState<number>(1760.00);
 
   // Sync form defaults with page-level referenceMonth
@@ -152,6 +171,13 @@ export default function StarlinkBilling() {
           return;
         }
 
+        if (localStorage.getItem('starlink_seeded_v1') === 'true') {
+          console.log("Database cleared of Starlink records by preference, skipping automatic seeding.");
+          setRecords([]);
+          setIsLoading(false);
+          return;
+        }
+
         let isAlreadySeededDB = false;
         try {
           const seedMetaDoc = await getDoc(doc(db, 'test', 'seeding_metadata'));
@@ -162,7 +188,7 @@ export default function StarlinkBilling() {
           console.warn("Could not retrieve remote seeding metadata for Starlink:", smErr);
         }
 
-        if (isAlreadySeededDB || localStorage.getItem('starlink_seeded_v1') === 'true') {
+        if (isAlreadySeededDB) {
           console.log("Database cleared of Starlink records by preference, skipping automatic seeding.");
           setRecords([]);
           setIsLoading(false);
@@ -171,6 +197,7 @@ export default function StarlinkBilling() {
         }
         // Seed the preseeded mock entries to Firestore if there is nothing in it yet
         try {
+          localStorage.setItem('starlink_seeded_v1', 'true');
           const batch = writeBatch(db);
           PRESEEDED_STARLINK_RECORDS.forEach((item) => {
             batch.set(doc(db, 'starlinkRecords', item.id), item);
@@ -181,7 +208,6 @@ export default function StarlinkBilling() {
           batch.set(seedMetaRef, { starlink: true }, { merge: true });
 
           await batch.commit();
-          localStorage.setItem('starlink_seeded_v1', 'true');
         } catch (error) {
           console.error("Error seeding Starlink records to Firestore:", error);
         }
@@ -200,20 +226,7 @@ export default function StarlinkBilling() {
   }, []);
 
   // Months lists
-  const availableMonths = [
-    'Janeiro/2026',
-    'Fevereiro/2026',
-    'Março/2026',
-    'Abril/2026',
-    'Maio/2026',
-    'Junho/2026',
-    'Julho/2026',
-    'Agosto/2026',
-    'Setembro/2026',
-    'Outubro/2026',
-    'Novembro/2026',
-    'Dezembro/2026'
-  ];
+  const availableMonths = getAvailableMonths();
 
   // Active records for currently selected month
   const activeRecords = useMemo(() => {

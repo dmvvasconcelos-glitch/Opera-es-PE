@@ -19,8 +19,8 @@ import UmTelecomBilling from './components/UmTelecomBilling';
 import VectraBilling from './components/VectraBilling';
 import StarlinkBilling from './components/StarlinkBilling';
 import ContactCenterBilling from './components/ContactCenterBilling';
-import { db, handleFirestoreError, OperationType, cleanUndefined } from './firebase';
-import { collection, doc, getDocs, getDoc, setDoc, deleteDoc, onSnapshot, writeBatch } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType, cleanUndefined, onSnapshot, getDocs, getDoc, setDoc, deleteDoc, writeBatch, onQuotaExceeded } from './firebase';
+import { collection, doc } from 'firebase/firestore';
 import { 
   Building2, 
   TrendingUp, 
@@ -49,7 +49,11 @@ import {
   CalendarClock,
   Zap,
   Network,
-  Globe
+  Globe,
+  AlertCircle,
+  Clock,
+  ShieldAlert,
+  WifiOff
 } from 'lucide-react';
 
 const getRoleLabel = (role: string) => {
@@ -81,6 +85,35 @@ export default function App() {
   // Authentication Session State
   const [user, setUser] = useState<UserSession | null>(null);
   const [sessionExpiredMessage, setSessionExpiredMessage] = useState<string>('');
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
+  const [currentTime, setCurrentTime] = useState<Date>(new Date());
+  const [isOffline, setIsOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false);
+
+  // Listen to browser online/offline status
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Listen to live ticking time
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Listen to Firestore Quota Exceeded events
+  useEffect(() => {
+    return onQuotaExceeded(setQuotaExceeded);
+  }, []);
 
   const isScreenAllowed = useCallback((screenId: string) => {
     if (!user) return false;
@@ -97,7 +130,10 @@ export default function App() {
     if (user.role === 'parceiro') {
       return screenId === 'atividades';
     }
-    // For others (editor, viewer, cliente)
+    if (user.role === 'cliente') {
+      return ['dashboard', 'contratos', 'contact-center'].includes(screenId);
+    }
+    // For others (editor, viewer)
     if (screenId === 'usuarios' || screenId === 'parceiros' || screenId === 'lpu') {
       return false;
     }
@@ -178,6 +214,15 @@ export default function App() {
               return;
             }
 
+            if (localStorage.getItem('portal_gestao_contracts_seeded') === 'true') {
+              console.log("Database cleared of contracts by preference, skipping automatic seeding.");
+              if (isActive) {
+                setContracts([]);
+                setIsInitializing(false);
+              }
+              return;
+            }
+
             let isAlreadySeededDB = false;
             try {
               const seedMetaDoc = await getDoc(doc(db, 'test', 'seeding_metadata'));
@@ -188,7 +233,7 @@ export default function App() {
               console.warn("Could not retrieve remote seeding metadata for Contracts:", smErr);
             }
 
-            if (isAlreadySeededDB || localStorage.getItem('portal_gestao_contracts_seeded') === 'true') {
+            if (isAlreadySeededDB) {
               console.log("Database cleared of contracts by preference, skipping automatic seeding.");
               if (isActive) {
                 setContracts([]);
@@ -199,6 +244,7 @@ export default function App() {
             }
             console.log("Sem contratos cadastrados no banco de dados, populando conjunto padrão...");
             try {
+              localStorage.setItem('portal_gestao_contracts_seeded', 'true');
               const batch = writeBatch(db);
               INITIAL_CONTRACTS.forEach(c => {
                 batch.set(doc(db, 'contracts', c.id), c);
@@ -208,7 +254,6 @@ export default function App() {
               batch.set(seedMetaRef, { contracts: true }, { merge: true });
 
               await batch.commit();
-              localStorage.setItem('portal_gestao_contracts_seeded', 'true');
             } catch (writeErr) {
               console.error("Falha ao injetar contratos padrões no Firestore:", writeErr);
             }
@@ -221,6 +266,7 @@ export default function App() {
             list.push(docSnap.data() as Contract);
           });
           list.sort((a, b) => a.id.localeCompare(b.id));
+          localStorage.setItem('portal_gestao_contracts', JSON.stringify(list));
           if (isActive) {
             setContracts(list);
             setIsInitializing(false);
@@ -240,18 +286,23 @@ export default function App() {
 
         // Pre-verify and seed system prices safely if absolutely missing from database (online/getDoc check)
         const pricesDocRef = doc(db, 'systemPrices', 'current');
-        getDoc(pricesDocRef).then(async (docSnap) => {
-          if (!docSnap.exists() && isActive) {
-            console.log("Sem tabelas tarifárias no banco de dados (verificado via getDoc), populando conjunto padrão...");
-            try {
-              await setDoc(pricesDocRef, INITIAL_PRICES);
-            } catch (writeErr) {
-              console.error("Falha ao salvar tarifas padrão no Firestore via getDoc:", writeErr);
+        if (localStorage.getItem('portal_gestao_prices_seeded') !== 'true') {
+          getDoc(pricesDocRef).then(async (docSnap) => {
+            if (!docSnap.exists() && isActive) {
+              console.log("Sem tabelas tarifárias no banco de dados (verificado via getDoc), populando conjunto padrão...");
+              try {
+                localStorage.setItem('portal_gestao_prices_seeded', 'true');
+                await setDoc(pricesDocRef, INITIAL_PRICES);
+              } catch (writeErr) {
+                console.error("Falha ao salvar tarifas padrão no Firestore via getDoc:", writeErr);
+              }
+            } else {
+              localStorage.setItem('portal_gestao_prices_seeded', 'true');
             }
-          }
-        }).catch((err) => {
-          console.warn("Erro ao ler tarifas atuais no pre-check getDoc:", err);
-        });
+          }).catch((err) => {
+            console.warn("Erro ao ler tarifas atuais no pre-check getDoc:", err);
+          });
+        }
 
         // Subscribe Real-time Prices
         unsubPrices = onSnapshot(pricesDocRef, (docSnap) => {
@@ -413,6 +464,8 @@ export default function App() {
   };
 
   // Synchronize active user presence & last login timestamps in real-time
+  const lastPresenceWriteRef = useRef<number>(0);
+
   useEffect(() => {
     if (!user) {
       return;
@@ -424,6 +477,14 @@ export default function App() {
 
     const updatePresence = async (isInitialSetup: boolean = false) => {
       try {
+        if (!active) return;
+        const nowMs = Date.now();
+        const lastSessionWrite = Number(sessionStorage.getItem(`presence_write_${emailKey}`) || '0');
+        // Prevent frequent Firestore write quota exhaustion! Write at most once every 5 minutes (300,000 ms) per tab session
+        if (nowMs - lastSessionWrite < 300000 && nowMs - lastPresenceWriteRef.current < 300000) {
+          return;
+        }
+
         const docSnap = await getDoc(userDocRef);
         if (!active) return;
 
@@ -436,6 +497,8 @@ export default function App() {
             lastLogin: isInitialSetup ? nowStr : (currentData.lastLogin || nowStr),
             lastActiveAt: nowIso
           }), { merge: true });
+          lastPresenceWriteRef.current = Date.now();
+          try { sessionStorage.setItem(`presence_write_${emailKey}`, String(Date.now())); } catch {}
 
           if (!active) return;
 
@@ -450,8 +513,10 @@ export default function App() {
               allowedScreens: currentData.allowedScreens || undefined,
               editableScreens: currentData.editableScreens || undefined,
             };
-            setUser(updatedUser);
-            saveSession(updatedUser);
+            if (JSON.stringify(updatedUser) !== JSON.stringify(user)) {
+              setUser(updatedUser);
+              saveSession(updatedUser);
+            }
           }
         } else {
           // Keep a robust fallback profile inside Firestore
@@ -464,29 +529,31 @@ export default function App() {
             lastLogin: nowStr,
             lastActiveAt: nowIso
           }), { merge: true });
+          lastPresenceWriteRef.current = Date.now();
+          try { sessionStorage.setItem(`presence_write_${emailKey}`, String(Date.now())); } catch {}
         }
       } catch (err) {
-        console.warn("Falha ao sincronizar presença no Firestore:", err);
+        console.warn("Falha ao sincronizar presença no Firestore (cota ou offline):", err);
       }
     };
 
     // Run on initial mount or session restore with true flag
     updatePresence(true);
 
-    // Heartbeat every 20 seconds
+    // Heartbeat every 5 minutes instead of 20 seconds to prevent quota limits
     const interval = setInterval(() => {
       const msSinceLastActivity = Date.now() - lastActivityRef.current;
       // Only keep updating if we have been active in the last 15 minutes
-      if (msSinceLastActivity < 15 * 60 * 1050) {
+      if (msSinceLastActivity < 15 * 60 * 1000) {
         updatePresence(false);
       }
-    }, 20000);
+    }, 300000);
 
     return () => {
       active = false;
       clearInterval(interval);
     };
-  }, [user]);
+  }, [user?.email]);
 
   // Automated 30-minute inactivity session tracking
   useEffect(() => {
@@ -624,10 +691,10 @@ export default function App() {
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-gradient-to-br from-[#f8fafc] via-[#edf4fe] to-[#fdf4e3] dark:from-[#111113] dark:via-zinc-950 dark:to-[#0c0c0e] text-zinc-800 dark:text-zinc-100 flex transition-colors duration-200 font-sans">      {/* ======================================================== */}
       {/* 1. DESKTOP SIDEBAR (Static docked Sidebar)                 */}
       {/* ======================================================== */}
-      <aside className={`hidden xl:flex xl:flex-col ${isSidebarCollapsed ? 'xl:w-20' : 'xl:w-64'} xl:fixed xl:inset-y-0 xl:left-0 bg-brand-deep dark:bg-zinc-950 border-r border-brand-border/20 dark:border-zinc-900 text-zinc-200 z-40 justify-between select-none shadow-xl transition-all duration-300 print:hidden`}>
-        <div>
+      <aside className={`hidden lg:flex lg:flex-col ${isSidebarCollapsed ? 'lg:w-20' : 'lg:w-64'} lg:fixed lg:inset-y-0 lg:left-0 bg-brand-deep dark:bg-zinc-950 border-r border-brand-border/20 dark:border-zinc-900 text-zinc-200 z-40 justify-between select-none shadow-xl transition-all duration-300 print:hidden h-screen max-h-screen overflow-hidden`}>
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
           {/* Brand area */}
-          <div className={`px-4 py-5 border-b border-brand-border/10 dark:border-zinc-900 bg-brand-deep dark:bg-zinc-950 flex items-center ${isSidebarCollapsed ? 'justify-center' : 'justify-between'} gap-2`}>
+          <div className={`px-4 py-5 border-b border-brand-border/10 dark:border-zinc-900 bg-brand-deep dark:bg-zinc-950 flex items-center ${isSidebarCollapsed ? 'justify-center' : 'justify-between'} gap-2 shrink-0`}>
             <div className="flex items-center gap-2.5">
               <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden shadow-md shrink-0 transform hover:scale-105 transition-transform duration-200" title="Método Telecom">
                 <div className="w-8 h-8 overflow-hidden flex items-center justify-center rounded-lg bg-transparent">
@@ -647,6 +714,12 @@ export default function App() {
                   <span className="text-[9px] text-zinc-400 font-mono font-bold block leading-none mt-1">
                     Método Telecom
                   </span>
+                  <div className="flex items-center gap-1.5 mt-1.5 animate-fade-in">
+                    <span className={`w-1.5 h-1.5 rounded-full ${isOffline ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`} />
+                    <span className="text-[8px] text-zinc-400/80 font-mono font-bold uppercase tracking-wider">
+                      {isOffline ? 'Cache Local' : 'Online'}
+                    </span>
+                  </div>
                 </div>
               )}
             </div>
@@ -670,7 +743,7 @@ export default function App() {
           </div>
 
           {/* Navigation group */}
-          <div className="px-4 py-6 flex flex-col gap-1.5 overflow-y-auto max-h-[calc(100vh-180px)] scrollbar-none">
+          <div className="px-4 py-6 flex flex-col gap-1.5 overflow-y-auto flex-1 min-h-0 scrollbar-none">
             {user?.role === 'parceiro' && !user?.allowedScreens ? (
               <button
                 onClick={() => setActiveTab('atividades')}
@@ -802,10 +875,7 @@ export default function App() {
                               }`}
                             >
                               <Network className={`h-4 w-4 shrink-0 ${activeTab === 'vectra' ? 'text-brand-light dark:text-brand' : 'text-zinc-500'}`} />
-                              <span className="text-xs flex items-center justify-between w-full">
-                                <span>Vectra</span>
-                                <span className="text-[8px] tracking-wide font-black bg-amber-500/10 text-amber-500 dark:text-amber-400 dark:bg-amber-500/15 px-1 py-0.5 rounded font-sans uppercase">Homolog.</span>
-                              </span>
+                              <span className="text-xs">Vectra</span>
                             </button>
                           )}
                         </motion.div>
@@ -1033,7 +1103,7 @@ export default function App() {
         </div>
 
         {/* User Card Profile details & controls at the base */}
-        <div className={`p-4 border-t border-brand-border/10 dark:border-zinc-900/70 bg-brand-deep/95 dark:bg-zinc-950/80 ${isSidebarCollapsed ? 'space-y-4' : 'space-y-3'} print:hidden`}>
+        <div className={`p-4 border-t border-brand-border/10 dark:border-zinc-900/70 bg-brand-deep/95 dark:bg-zinc-950/80 ${isSidebarCollapsed ? 'space-y-4' : 'space-y-3'} print:hidden shrink-0`}>
           <div className={`bg-brand-medium/30 dark:bg-zinc-900/40 p-3 rounded-xl border border-brand-border/10 dark:border-zinc-900/60 flex items-center ${isSidebarCollapsed ? 'justify-center' : 'gap-3'}`} title={`${user.displayName} (${user.role})`}>
             <div className="h-8 w-8 rounded-lg bg-brand dark:bg-zinc-800 border border-brand-light/10 text-white flex items-center justify-center font-black text-xs uppercase shrink-0">
               {user.displayName.substring(0, 2)}
@@ -1091,7 +1161,7 @@ export default function App() {
       {/* ======================================================== */}
       <AnimatePresence>
         {isMobileSidebarOpen && (
-          <div className="fixed inset-0 z-50 xl:hidden flex">
+          <div className="fixed inset-0 z-50 lg:hidden flex">
             {/* Backdrop blur overlay with fade animation */}
             <motion.div 
               initial={{ opacity: 0 }}
@@ -1108,11 +1178,11 @@ export default function App() {
               animate={{ x: 0 }}
               exit={{ x: "-100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 220 }}
-              className="w-80 bg-zinc-950 border-r border-zinc-900 text-zinc-300 h-full flex flex-col justify-between relative z-50 shadow-2xl"
+              className="w-80 bg-zinc-950 border-r border-zinc-900 text-zinc-300 h-full flex flex-col justify-between relative z-50 shadow-2xl overflow-hidden"
             >
-              <div>
+              <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
                 {/* Drawer Header Brand area */}
-                <div className="p-6 border-b border-zinc-900/80 flex items-center justify-between">
+                <div className="p-6 border-b border-zinc-900/80 flex items-center justify-between shrink-0">
                   <div className="flex items-center gap-3">
                     <div className="w-11 h-11 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden shadow-md shrink-0">
                       <div className="w-8 h-8 overflow-hidden flex items-center justify-center rounded-lg bg-transparent">
@@ -1131,6 +1201,12 @@ export default function App() {
                       <span className="text-[9px] text-zinc-400 font-mono font-bold block leading-none mt-1">
                         Método Telecom
                       </span>
+                      <div className="flex items-center gap-1 mt-1 animate-fade-in">
+                        <span className={`w-1.5 h-1.5 rounded-full ${isOffline ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`} />
+                        <span className="text-[8px] text-zinc-500 font-mono font-bold uppercase tracking-wider">
+                          {isOffline ? 'Cache Local' : 'Online'}
+                        </span>
+                      </div>
                     </div>
                   </div>
                   
@@ -1143,7 +1219,7 @@ export default function App() {
                 </div>
 
                 {/* Navigation lists */}
-                <div className="px-4 py-6 space-y-6">
+                <div className="px-4 py-6 space-y-6 overflow-y-auto flex-1 min-h-0 scrollbar-none">
                   <div className="space-y-2">
                     <span className="block px-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-3">
                       Módulos de Gestão
@@ -1293,10 +1369,7 @@ export default function App() {
                                         }`}
                                       >
                                         <Network className={`h-4 w-4 shrink-0 ${activeTab === 'vectra' ? 'text-brand' : 'text-zinc-550'}`} />
-                                        <span className="text-xs flex items-center justify-between w-full">
-                                          <span>Vectra</span>
-                                          <span className="text-[8px] bg-amber-500/10 text-amber-500 dark:text-amber-400 dark:bg-amber-500/15 px-1 py-0.5 rounded font-sans uppercase font-bold">Homolog.</span>
-                                        </span>
+                                        <span className="text-xs">Vectra</span>
                                       </button>
                                     )}
                                   </motion.div>
@@ -1413,7 +1486,7 @@ export default function App() {
               </div>
 
               {/* Profile area & actions at drawer base */}
-              <div className="p-4 border-t border-zinc-900 bg-zinc-950/80 space-y-3">
+              <div className="p-4 border-t border-zinc-900 bg-zinc-950/80 space-y-3 shrink-0">
                 <div className="bg-zinc-900/80 p-3 rounded-2xl border border-zinc-800/80 flex items-center gap-3">
                   <div className="h-8 w-8 rounded-lg bg-zinc-800 border border-zinc-700/60 text-white flex items-center justify-center font-black text-xs uppercase shrink-0">
                     {user.displayName.substring(0, 2)}
@@ -1459,30 +1532,61 @@ export default function App() {
       {/* ======================================================== */}
       {/* 3. MAIN WORKSPACE WRAPPER (Content view area)            */}
       {/* ======================================================== */}
-      <div className={`flex-1 flex flex-col min-w-0 w-full max-w-full overflow-x-hidden ${isSidebarCollapsed ? 'xl:pl-20' : 'xl:pl-64'} print:pl-0 min-h-screen transition-all duration-300`}>
+      <div className={`flex-1 flex flex-col min-w-0 w-full max-w-full overflow-x-hidden ${isSidebarCollapsed ? 'lg:pl-20' : 'lg:pl-64'} print:pl-0 min-h-screen transition-all duration-300`}>
         
-        {/* Mobile sticky top header bar to prevent title overlap */}
-        <header className="xl:hidden flex items-center justify-between px-4 py-3 bg-white dark:bg-zinc-900 border-b border-zinc-200/80 dark:border-zinc-800 sticky top-0 z-30 print:hidden shadow-xs">
+        {/* Persistent top header bar visible on all screen sizes for all users */}
+        <header className="flex items-center justify-between px-4 sm:px-6 py-3 bg-white dark:bg-zinc-900 border-b border-zinc-200/80 dark:border-zinc-800 sticky top-0 z-30 print:hidden shadow-xs">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setIsMobileSidebarOpen(true)}
-              className="p-2.5 bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-850 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600 dark:text-zinc-400 cursor-pointer"
+              className="lg:hidden p-2.5 bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-850 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-600 dark:text-zinc-400 cursor-pointer"
               aria-label="Abrir menu"
             >
               <Menu className="h-5 w-5" />
             </button>
             <div className="leading-tight">
-              <span className="block text-xs font-black uppercase tracking-wider text-zinc-900 dark:text-white font-sans">
+              <span className="block text-xs sm:text-sm font-black uppercase tracking-wider text-zinc-900 dark:text-white font-sans">
                 {getBreadcrumbTitle()}
               </span>
               <span className="text-[9px] text-zinc-450 dark:text-zinc-500 font-mono block leading-none">
                 Método Telecom
               </span>
+              <div className="flex items-center gap-1 mt-1 animate-fade-in">
+                <span className={`w-1.5 h-1.5 rounded-full ${isOffline ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`} />
+                <span className="text-[8px] text-zinc-400 dark:text-zinc-500 font-mono font-bold uppercase tracking-wider">
+                  {isOffline ? 'Offline' : 'Online'}
+                </span>
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-brand text-white flex items-center justify-center font-black text-xs uppercase shadow-inner">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              onClick={toggleDarkMode}
+              className="px-2.5 py-1.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 text-xs font-bold shadow-2xs"
+              title="Alternar Tema (Claro / Escuro)"
+            >
+              {darkMode ? (
+                <>
+                  <Sun className="h-4 w-4 text-amber-500 animate-pulse shrink-0" />
+                  <span className="hidden sm:inline">Claro</span>
+                </>
+              ) : (
+                <>
+                  <Moon className="h-4 w-4 text-zinc-700 dark:text-zinc-300 shrink-0" />
+                  <span className="hidden sm:inline">Escuro</span>
+                </>
+              )}
+            </button>
+            <button
+              onClick={handleLogout}
+              className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 text-xs font-bold shadow-2xs"
+              title="Sair do Portal"
+            >
+              <LogOut className="h-4 w-4 shrink-0" />
+              <span>Sair</span>
+            </button>
+            <div className="h-8 w-8 rounded-lg bg-brand text-white flex items-center justify-center font-black text-xs uppercase shadow-inner ml-1 shrink-0" title={`${user.displayName} (${getRoleLabel(user.role)})`}>
               {user.displayName.substring(0, 2)}
             </div>
           </div>
@@ -1493,6 +1597,50 @@ export default function App() {
         {/* ======================================================== */}
         <main className="flex-grow p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl w-full mx-auto print:p-0 print:max-w-none">
           
+          {quotaExceeded && (
+            <div id="quota-exceeded-banner" className="bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/35 rounded-2xl p-4.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xs select-none">
+              <div className="flex items-start gap-3.5">
+                <AlertCircle className="h-6 w-6 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <h4 className="text-sm font-black text-amber-800 dark:text-amber-400 font-sans tracking-tight">
+                    Limite de Cota do Banco de Dados Atingido (Spark Plan)
+                  </h4>
+                  <p className="text-xs text-amber-700/90 dark:text-amber-500/90 leading-relaxed font-sans font-medium">
+                    O portal atingiu o limite gratuito de leitura diária do Firestore (50 mil leituras/dia) e está operando temporariamente em <strong>modo de contingência offline local</strong>. Todas as funcionalidades de consulta e edição permanecem utilizáveis com persistência no navegador, e serão sincronizadas quando a cota resetar amãna.
+                  </p>
+                </div>
+              </div>
+              <a 
+                href="https://console.firebase.google.com/project/gen-lang-client-0536991907/firestore/databases/ai-studio-058f0539-1167-4858-81f8-f962175f4994/data?openUpgradeDialog=true" 
+                target="_blank" 
+                rel="noreferrer"
+                className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 dark:bg-amber-500 dark:hover:bg-amber-600 text-white dark:text-zinc-950 font-extrabold text-xs rounded-xl shadow-md transition-all whitespace-nowrap shrink-0 flex items-center gap-1.5 cursor-pointer hover:scale-102 active:scale-98 select-none"
+              >
+                <Database className="h-4 w-4" />
+                <span>Console do Banco</span>
+              </a>
+            </div>
+          )}
+
+          {isOffline && !quotaExceeded && (
+            <div id="offline-mode-banner" className="bg-zinc-100 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-2xs select-none animate-fade-in">
+              <div className="flex items-start gap-3">
+                <WifiOff className="h-5 w-5 text-zinc-500 dark:text-zinc-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <h4 className="text-xs font-black text-zinc-800 dark:text-zinc-200 uppercase tracking-wider font-sans">
+                    Navegação em Modo Cache Local Ativo
+                  </h4>
+                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed font-sans font-medium">
+                    O portal perdeu contato temporário com o servidor ou está operando offline. Não se preocupe: você pode continuar visualizando, editando e gerando relatórios normalmente. Todas as alterações serão sincronizadas com o banco de dados Firebase assim que a conexão for restabelecida.
+                  </p>
+                </div>
+              </div>
+              <div className="px-3 py-1 bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-extrabold text-[10px] uppercase tracking-wider rounded-lg whitespace-nowrap shrink-0">
+                Operando em Cache
+              </div>
+            </div>
+          )}
+
           {/* Render Active View Tab component accordingly with hardware-accelerated transitions */}
           <AnimatePresence mode="wait">
             <motion.div
@@ -1503,8 +1651,8 @@ export default function App() {
               transition={{ duration: 0.18, ease: "easeOut" }}
               className="space-y-6"
             >
-              {activeTab === 'dashboard' && user?.role !== 'parceiro' && <Dashboard contracts={visibleContracts} prices={prices} user={user} />}
-              {activeTab === 'contratos' && (
+              {activeTab === 'dashboard' && user?.role !== 'parceiro' && isScreenAllowed('dashboard') && <Dashboard contracts={visibleContracts} prices={prices} user={user} />}
+              {activeTab === 'contratos' && isScreenAllowed('contratos') && (
                 <ContractTable
                   contracts={visibleContracts}
                   prices={prices}
@@ -1514,36 +1662,36 @@ export default function App() {
                 />
               )}
 
-              {activeTab === 'usuarios' && user?.role === 'admin' && (
+              {activeTab === 'usuarios' && user?.role === 'admin' && isScreenAllowed('usuarios') && (
                 <UserManagement currentUser={user} />
               )}
               
-              {activeTab === 'parceiros' && (
+              {activeTab === 'parceiros' && isScreenAllowed('parceiros') && (
                 <SuppliersManagement currentUser={user} activeSection="parceiros" />
               )}
               
-              {activeTab === 'lpu' && (
+              {activeTab === 'lpu' && isScreenAllowed('lpu') && (
                 <SuppliersManagement currentUser={user} activeSection="lpu" />
               )}
 
-              {activeTab === 'atividades' && (
+              {activeTab === 'atividades' && isScreenAllowed('atividades') && (
                 <AtividadesManagement currentUser={user} />
               )}
               
-              {activeTab === 'contact-center' && (
+              {activeTab === 'contact-center' && isScreenAllowed('contact-center') && (
                 <ContactCenterBilling user={user} />
               )}
 
-              {activeTab === 'um-telecom' && (
-                <UmTelecomBilling />
+              {activeTab === 'um-telecom' && isScreenAllowed('um-telecom') && (
+                <UmTelecomBilling user={user} />
               )}
 
-              {activeTab === 'vectra' && (
-                <VectraBilling />
+              {activeTab === 'vectra' && isScreenAllowed('vectra') && (
+                <VectraBilling user={user} />
               )}
 
-              {activeTab === 'starlink' && (
-                <StarlinkBilling />
+              {activeTab === 'starlink' && isScreenAllowed('starlink') && (
+                <StarlinkBilling user={user} />
               )}
             </motion.div>
           </AnimatePresence>

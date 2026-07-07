@@ -58,6 +58,7 @@ export interface Supplier {
   nome: string;
   empresa?: string;
   contato: string;
+  email?: string;
   cpf: string;
   cnpj: string;
   endereco: string;

@@ -73,6 +73,7 @@ export default function AuthWindow({ onLoginSuccess, initialMessage }: AuthWindo
             return;
           }
           console.log("Seeding systemUsers inside AuthWindow...");
+          localStorage.setItem('system_users_seeded', 'true');
           const batch = writeBatch(db);
           DEFAULT_USERS.forEach((usr) => {
             const docId = usr.email.toLowerCase().trim();
@@ -88,7 +89,6 @@ export default function AuthWindow({ onLoginSuccess, initialMessage }: AuthWindo
           batch.set(seedMetaRef, { systemUsers: true }, { merge: true });
 
           await batch.commit();
-          localStorage.setItem('system_users_seeded', 'true');
         } else {
           localStorage.setItem('system_users_seeded', 'true');
         }

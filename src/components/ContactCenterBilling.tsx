@@ -6,18 +6,13 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { jsPDF } from 'jspdf';
 import * as XLSX from 'xlsx';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { db, handleFirestoreError, OperationType, onSnapshot, getDocs, getDoc, setDoc, deleteDoc, writeBatch } from '../firebase';
 import { UserSession } from '../types';
+import { useCurrentMonthFilter, getCurrentMonth, getPreviousMonth, getAvailableMonths, isUnseededMonth } from '../utils/monthUtils';
 import { 
   collection, 
   doc, 
-  setDoc, 
-  deleteDoc, 
-  onSnapshot, 
-  writeBatch,
-  serverTimestamp,
-  getDocs,
-  getDoc
+  serverTimestamp
 } from 'firebase/firestore';
 import { 
   Search, 
@@ -157,14 +152,14 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
   // Page Core State
   const [records, setRecords] = useState<ContactCenterOS[]>([]);
   const [prices, setPrices] = useState<ContactCenterPrices>(DEFAULT_CC_PRICES);
-  const [referenceMonth, setReferenceMonth] = useState('Junho/2026');
+  const [referenceMonth, setReferenceMonth] = useCurrentMonthFilter();
   const [isLoading, setIsLoading] = useState(false);
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
 
   // Month replication states
   const [showReplicateModal, setShowReplicateModal] = useState(false);
-  const [replicateSourceMonth, setReplicateSourceMonth] = useState('Maio/2026');
-  const [replicateTargetMonth, setReplicateTargetMonth] = useState('Junho/2026');
+  const [replicateSourceMonth, setReplicateSourceMonth] = useState(getPreviousMonth);
+  const [replicateTargetMonth, setReplicateTargetMonth] = useState(getCurrentMonth);
   const [isReplicating, setIsReplicating] = useState(false);
 
   // Filters State
@@ -189,7 +184,7 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
   const [formUraBasica, setFormUraBasica] = useState<number>(0);
   const [formUraCritica, setFormUraCritica] = useState<number>(0);
   const [formObservacoes, setFormObservacoes] = useState('');
-  const [formReferenceMonth, setFormReferenceMonth] = useState('Junho/2026');
+  const [formReferenceMonth, setFormReferenceMonth] = useState(getCurrentMonth);
   const [formDate, setFormDate] = useState(() => {
     const today = new Date();
     return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -267,6 +262,12 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
           return;
         }
 
+        if (localStorage.getItem('cc_seeded_v6') === 'true') {
+          setRecords([]);
+          setIsLoading(false);
+          return;
+        }
+
         let isAlreadySeededDB = false;
         try {
           const seedMetaDoc = await getDoc(doc(db, 'test', 'seeding_metadata'));
@@ -277,7 +278,7 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
           console.warn("Could not retrieve remote seeding metadata for CC:", smErr);
         }
 
-        const isSeeded = isAlreadySeededDB || localStorage.getItem('cc_seeded_v6') === 'true';
+        const isSeeded = isAlreadySeededDB;
         if (isSeeded) {
           setRecords([]);
           setIsLoading(false);
@@ -288,6 +289,8 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
 
         // Auto-seed preseeded mock contents + direct replication from June to March-May
         try {
+          localStorage.setItem('cc_seeded_v6', 'true');
+          localStorage.setItem('cc_replicated_v6', 'true');
           const batch = writeBatch(db);
           
           // Seed source June records
@@ -316,51 +319,12 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
           batch.set(seedMetaRef, { contactCenter: true }, { merge: true });
 
           await batch.commit();
-          localStorage.setItem('cc_seeded_v6', 'true');
-          localStorage.setItem('cc_replicated_v6', 'true');
         } catch (e) {
           console.error("Erro ao popular banco de dados de Contact Center:", e);
           setIsLoading(false);
         }
       } else {
-        // Enforce direct db auto-replication if not already run in this client session scope
-        const hasReplicated = localStorage.getItem('cc_replicated_v6') === 'true';
-        if (!hasReplicated) {
-          try {
-            const juneRecords = list.filter(r => r.referenceMonth === 'Junho/2026');
-            const source = juneRecords.length > 0 ? juneRecords : PRESEEDED_CONTACT_CENTER.filter(r => r.referenceMonth === 'Junho/2026');
-
-            const batch = writeBatch(db);
-            
-            // Delete existing records in target months to overwrite cleanly
-            const existingInTargetMonths = list.filter(r => targetMonths.includes(r.referenceMonth));
-            existingInTargetMonths.forEach((oldRec) => {
-              // Only delete if it's not one of the old invalid IDs that we can't delete anyway
-              if (/^[a-zA-Z0-9_\-]+$/.test(oldRec.id)) {
-                batch.delete(doc(db, 'contactCenterRecords', oldRec.id));
-              }
-            });
-
-            // Replicate June records to targeted months
-            source.forEach((juneRec) => {
-              targetMonths.forEach((m) => {
-                const cleanId = juneRec.id.replace('cc-preseed-', '').replace('cc-', '');
-                const safeId = `cc-auto-${cleanId}-${mapMonthToAscii(m)}`;
-                const replicatedRecord: ContactCenterOS = {
-                  ...juneRec,
-                  id: safeId,
-                  referenceMonth: m
-                };
-                batch.set(doc(db, 'contactCenterRecords', safeId), replicatedRecord);
-              });
-            });
-
-            await batch.commit();
-            localStorage.setItem('cc_replicated_v6', 'true');
-          } catch (e) {
-            console.error("Erro ao auto-replicar dados diretamente no Firestore:", e);
-          }
-        }
+        localStorage.setItem('cc_replicated_v6', 'true');
         localStorage.setItem('cc_seeded_v6', 'true');
         setRecords(list);
       }
@@ -383,20 +347,7 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
   }, [referenceMonth, editingRecord]);
 
   // Months List
-  const availableMonths = [
-    'Janeiro/2026',
-    'Fevereiro/2026',
-    'Março/2026',
-    'Abril/2026',
-    'Maio/2026',
-    'Junho/2026',
-    'Julho/2026',
-    'Agosto/2026',
-    'Setembro/2026',
-    'Outubro/2026',
-    'Novembro/2026',
-    'Dezembro/2026'
-  ];
+  const availableMonths = getAvailableMonths();
 
   const isZeroMonthSelected = referenceMonth === 'Janeiro/2026' || referenceMonth === 'Fevereiro/2026';
 
@@ -1371,7 +1322,7 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
                   if (idx > 0) {
                     setReplicateSourceMonth(availableMonths[idx - 1]);
                   } else {
-                    setReplicateSourceMonth('Maio/2026');
+                    setReplicateSourceMonth(getPreviousMonth(referenceMonth));
                   }
                   setReplicateTargetMonth(referenceMonth);
                   setShowReplicateModal(true);
@@ -1604,9 +1555,9 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
                 <tr>
                   <td colSpan={14} className="text-center p-14 text-zinc-450 dark:text-zinc-650 italic">
                     <p className="flex justify-center mb-2"><AlertCircle className="h-8 w-8 text-zinc-350" /></p>
-                    {['Julho/2026', 'Agosto/2026', 'Setembro/2026', 'Outubro/2026', 'Novembro/2026', 'Dezembro/2026'].includes(referenceMonth) ? (
+                    {isUnseededMonth(referenceMonth) ? (
                       <div>
-                        <p className="font-bold text-zinc-600 dark:text-zinc-350 not-italic text-sm">Nenhum dado cadastrado para este mês futuro.</p>
+                        <p className="font-bold text-zinc-600 dark:text-zinc-350 not-italic text-sm">Nenhum dado cadastrado para este mês de referência.</p>
                         <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1">Utilize o botão <strong className="text-emerald-600 dark:text-emerald-400 font-extrabold font-sans">"Replicar Mês"</strong> no topo para importar a tabela faturamento de outro mês de referência.</p>
                       </div>
                     ) : (
@@ -1672,7 +1623,7 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
                       
                       {/* Secretaria */}
                       <td 
-                        className="py-2.5 px-4 text-zinc-900 dark:text-zinc-350 font-bold text-xs max-w-[210px] truncate"
+                        className="py-2.5 px-4 text-zinc-900 dark:text-zinc-200 font-bold text-xs max-w-[210px] truncate"
                         title={r.secretaria}
                       >
                         {r.secretaria}

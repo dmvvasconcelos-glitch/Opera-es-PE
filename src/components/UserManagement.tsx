@@ -5,9 +5,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { DEFAULT_USERS, getStoredSession } from '../auth-sim';
-import { db, cleanUndefined } from '../firebase';
+import { db, cleanUndefined, onSnapshot, getDoc, setDoc, deleteDoc, writeBatch } from '../firebase';
 import { UserSession } from '../types';
-import { collection, doc, onSnapshot, setDoc, deleteDoc, writeBatch, getDoc } from 'firebase/firestore';
+import { collection, doc } from 'firebase/firestore';
 import { 
   Users, 
   UserPlus, 
@@ -181,6 +181,12 @@ export default function UserManagement({ currentUser }: UserManagementProps = {}
           return;
         }
 
+        if (localStorage.getItem('system_users_seeded') === 'true') {
+          console.log("Database cleared of system users by preference, skipping automatic seeding.");
+          setUsers([]);
+          return;
+        }
+
         let isAlreadySeededDB = false;
         try {
           const seedMetaDoc = await getDoc(doc(db, 'test', 'seeding_metadata'));
@@ -191,7 +197,7 @@ export default function UserManagement({ currentUser }: UserManagementProps = {}
           console.warn("Could not retrieve remote seeding metadata for Users:", smErr);
         }
 
-        if (isAlreadySeededDB || localStorage.getItem('system_users_seeded') === 'true') {
+        if (isAlreadySeededDB) {
           console.log("Database cleared of system users by preference, skipping automatic seeding.");
           setUsers([]);
           localStorage.setItem('system_users_seeded', 'true');
@@ -199,6 +205,7 @@ export default function UserManagement({ currentUser }: UserManagementProps = {}
         }
         console.log("Sem usuários cadastrados no Firestore, populando conjunto padrão...");
         try {
+          localStorage.setItem('system_users_seeded', 'true');
           const batch = writeBatch(db);
           DEFAULT_USERS.forEach((usr) => {
             const docId = usr.email.toLowerCase().trim();
@@ -214,7 +221,6 @@ export default function UserManagement({ currentUser }: UserManagementProps = {}
           batch.set(seedMetaRef, { systemUsers: true }, { merge: true });
 
           await batch.commit();
-          localStorage.setItem('system_users_seeded', 'true');
         } catch (err) {
           console.error("Falha ao injetar usuários padrões:", err);
           setError("Erro ao inicializar base de dados de usuários.");
@@ -900,256 +906,266 @@ export default function UserManagement({ currentUser }: UserManagementProps = {}
         </div>
 
         {/* Users Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse" id="users-data-table">
+        <div className="overflow-x-auto select-none">
+          <table className="w-full text-left border-collapse table-auto" id="users-data-table">
             <thead>
               <tr className="bg-zinc-50/50 dark:bg-zinc-950/20 text-zinc-400 dark:text-zinc-500 text-[10px] font-bold uppercase tracking-widest border-b border-zinc-150 dark:border-zinc-800/80">
-                <th className="py-4 px-6 font-mono">Nome Completo / Órgão</th>
-                <th className="py-4 px-6 font-mono">Último Login</th>
-                <th className="py-4 px-6 font-mono">Nível de Acesso</th>
-                <th className="py-4 px-6 font-mono text-center">Status</th>
-                <th className="py-4 px-6 font-mono text-center">Permissão Ativa</th>
-                <th className="py-4 px-6 font-mono text-right">Ações</th>
+                <th className="py-3 px-4 font-mono">Nome Completo / Órgão</th>
+                <th className="py-3 px-4 font-mono">Último Login</th>
+                <th className="py-3 px-4 font-mono">Nível de Acesso & Permissões</th>
+                <th className="py-3 px-4 font-mono">Status / Acesso</th>
+                <th className="py-3 px-4 font-mono text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60 text-xs">
               {filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-zinc-400 font-medium">
+                  <td colSpan={5} className="py-12 text-center text-zinc-400 font-medium">
                     Nenhum usuário correspondente encontrado.
                   </td>
                 </tr>
               ) : (
-                filteredUsers.map((item) => (
-                  <tr key={item.email} className="hover:bg-zinc-50/40 dark:hover:bg-zinc-800/10 transition-colors group">
-                    
-                    {/* User display name */}
-                    <td className="py-4 px-6 font-medium text-zinc-900 dark:text-zinc-100">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-xl bg-brand/5 border border-brand/10 dark:bg-brand/10 text-brand dark:text-brand-light flex items-center justify-center font-bold text-xs uppercase font-mono transition-transform group-hover:scale-105 shadow-inner">
-                          {item.displayName.substring(0, 2)}
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="font-semibold text-zinc-800 dark:text-zinc-150 text-xs transition-colors group-hover:text-brand dark:group-hover:text-brand-light">
-                            {item.displayName}
-                          </span>
-                          <span className="text-[11px] text-zinc-400 dark:text-zinc-500 font-mono flex items-center gap-1 mt-0.5 select-all">
-                            <Mail className="h-3 w-3 text-zinc-350 dark:text-zinc-650 shrink-0" />
-                            {item.email}
-                          </span>
-                        </div>
-                      </div>
-                    </td>
+                filteredUsers.map((item) => {
+                  const role = item.role;
+                  let badgeBg = '';
+                  let badgeLabel = '';
+                  let icon = null;
+                  
+                  if (role === 'admin') {
+                    badgeBg = 'bg-indigo-50/80 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-400 border-indigo-100/50 dark:border-indigo-900/30';
+                    badgeLabel = 'ADMIN GERAL';
+                    icon = <Shield className="h-3 w-3 shrink-0" />;
+                  } else if (role === 'editor') {
+                    badgeBg = 'bg-emerald-50/80 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-100/50 dark:border-emerald-900/30';
+                    badgeLabel = 'EDITOR';
+                    icon = <Pencil className="h-3 w-3 shrink-0" />;
+                  } else if (role === 'analista') {
+                    badgeBg = 'bg-blue-50/80 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400 border-blue-100/50 dark:border-blue-900/30';
+                    badgeLabel = 'ANALISTA';
+                    icon = <UserCheck className="h-3 w-3 shrink-0" />;
+                  } else if (role === 'parceiro') {
+                    badgeBg = 'bg-amber-50/80 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 border-amber-100/50 dark:border-amber-900/30';
+                    badgeLabel = 'PARCEIRO';
+                    icon = <Building2 className="h-3 w-3 shrink-0" />;
+                  } else { // cliente
+                    badgeBg = 'bg-zinc-100/80 text-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-300 border-zinc-200/50 dark:border-zinc-700/50';
+                    badgeLabel = 'CLIENTE RESTRITO';
+                    icon = <User className="h-3 w-3 shrink-0" />;
+                  }
 
-                    {/* Último Login */}
-                    <td className="py-4 px-6 text-xs">
-                      {isOnline(item) ? (
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-center gap-1.5">
-                            <span className="relative flex h-2 w-2 select-none">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  return (
+                    <tr key={item.email} className="hover:bg-zinc-50/40 dark:hover:bg-zinc-800/10 transition-colors group">
+                      
+                      {/* User display name */}
+                      <td className="py-3 px-4 font-medium text-zinc-900 dark:text-zinc-100">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-xl bg-brand/5 border border-brand/10 dark:bg-brand/10 text-brand dark:text-brand-light flex items-center justify-center font-bold text-xs uppercase font-mono transition-transform group-hover:scale-105 shadow-inner shrink-0">
+                            {item.displayName.substring(0, 2)}
+                          </div>
+                          <div className="flex flex-col min-w-0">
+                            <span className="font-semibold text-zinc-800 dark:text-zinc-100 text-xs transition-colors group-hover:text-brand dark:group-hover:text-brand-light truncate max-w-[180px]" title={item.displayName}>
+                              {item.displayName}
                             </span>
-                            <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider leading-none font-mono">Online</span>
+                            <span className="text-[11px] text-zinc-400 dark:text-zinc-500 font-mono flex items-center gap-1 mt-0.5 select-all truncate max-w-[180px]" title={item.email}>
+                              <Mail className="h-3 w-3 text-zinc-350 dark:text-zinc-650 shrink-0" />
+                              {item.email}
+                            </span>
                           </div>
-                          <span className="text-[10px] text-zinc-650 dark:text-zinc-300 font-bold font-mono whitespace-nowrap">
-                            {item.lastLogin || new Date().toLocaleString('pt-BR')}
-                          </span>
                         </div>
-                      ) : (
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500">
-                            <span className="h-2 w-2 rounded-full bg-zinc-300 dark:bg-zinc-700"></span>
-                            <span className="text-[10px] font-semibold uppercase tracking-wider leading-none font-mono">Offline</span>
+                      </td>
+
+                      {/* Último Login */}
+                      <td className="py-3 px-4 text-xs">
+                        {isOnline(item) ? (
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="relative flex h-2 w-2 select-none">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                              </span>
+                              <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider leading-none font-mono">Online</span>
+                            </div>
+                            <span className="text-[10px] text-zinc-650 dark:text-zinc-300 font-bold font-mono whitespace-nowrap">
+                              {item.lastLogin || new Date().toLocaleString('pt-BR')}
+                            </span>
                           </div>
-                          {item.lastLogin ? (
-                            <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium font-mono whitespace-nowrap font-bold">
-                              {item.lastLogin}
+                        ) : (
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500">
+                              <span className="h-2 w-2 rounded-full bg-zinc-300 dark:bg-zinc-700"></span>
+                              <span className="text-[10px] font-semibold uppercase tracking-wider leading-none font-mono">Offline</span>
+                            </div>
+                            {item.lastLogin ? (
+                              <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-bold font-mono whitespace-nowrap">
+                                {item.lastLogin}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-zinc-350 dark:text-zinc-650 italic font-mono whitespace-nowrap">Nunca logado</span>
+                            )}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Nível de Acesso & Permissões */}
+                      <td className="py-3 px-4">
+                        <div className="flex flex-col gap-1.5">
+                          <div className="flex items-center">
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${badgeBg}`}>
+                              {icon}
+                              {badgeLabel}
+                            </span>
+                          </div>
+                          
+                          {item.role !== 'admin' && (
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-semibold text-zinc-500 dark:text-zinc-400 font-mono">
+                              {item.role === 'cliente' && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingSecretapiasUser(item);
+                                    setEditingUserSecretapias(item.secretarias || []);
+                                  }}
+                                  className="inline-flex items-center gap-1 text-brand dark:text-brand-light hover:underline cursor-pointer bg-brand/5 dark:bg-brand/20 border border-brand/10 dark:border-brand/30 px-1.5 py-0.5 rounded"
+                                  title="Gerenciar secretarias liberadas"
+                                >
+                                  <Building2 className="h-2.5 w-2.5 shrink-0 text-brand" />
+                                  <span>{(item.secretarias || []).length} Secs</span>
+                                </button>
+                              )}
+
+                              {item.role === 'parceiro' && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingParceiroUser(item);
+                                    setSelectedParceiroModalId(item.parceiroId || '');
+                                  }}
+                                  className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400 hover:underline cursor-pointer bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/10 dark:border-amber-500/30 px-1.5 py-0.5 rounded truncate max-w-[120px]"
+                                  title={`Parceiro: ${item.parceiroNome || 'Nenhum'}`}
+                                >
+                                  <Building2 className="h-2.5 w-2.5 shrink-0 text-amber-500" />
+                                  <span className="truncate">{item.parceiroNome || 'Sem Parceiro'}</span>
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingScreensUser(item);
+                                  setEditingUserScreens(item.allowedScreens || getDefaultScreensForRole(item.role));
+                                }}
+                                className="inline-flex items-center gap-1 text-zinc-650 dark:text-zinc-300 hover:underline cursor-pointer bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700/50 px-1.5 py-0.5 rounded"
+                                title="Customizar telas permitidas"
+                              >
+                                <ShieldCheck className="h-2.5 w-2.5 text-zinc-500 dark:text-zinc-400 shrink-0" />
+                                <span>{(item.allowedScreens || getDefaultScreensForRole(item.role)).length}/10 Telas</span>
+                              </button>
+                            </div>
+                          )}
+
+                          {item.role === 'admin' && (
+                            <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold font-mono flex items-center gap-1">
+                              <CheckCircle className="h-3 w-3 text-emerald-500 shrink-0" />
+                              <span>Controle Geral do Sistema</span>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Status / Acesso */}
+                      <td className="py-3 px-4">
+                        <div className="flex items-center">
+                          {item.email === 'admin@portal.com' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold font-mono uppercase bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/10">
+                              Ativo (Geral)
                             </span>
                           ) : (
-                            <span className="text-[10px] text-zinc-350 dark:text-zinc-650 italic font-mono whitespace-nowrap">Nunca logado</span>
+                            <div className="flex items-center gap-2.5">
+                              <button
+                                id={`btn-toggle-status-${item.email}`}
+                                onClick={() => handleToggleStatus(item.email)}
+                                role="switch"
+                                aria-checked={item.status === 'Ativo'}
+                                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-1 focus:ring-brand/30 ${
+                                  item.status === 'Ativo' ? 'bg-brand' : 'bg-zinc-200 dark:bg-zinc-800'
+                                }`}
+                                title={item.status === 'Ativo' ? 'Clique para Bloquear Acesso' : 'Clique para Liberar Acesso'}
+                              >
+                                <span
+                                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                                    item.status === 'Ativo' ? 'translate-x-4' : 'translate-x-0'
+                                  }`}
+                                />
+                              </button>
+                              {item.status === 'Ativo' ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 font-sans">
+                                  Ativo
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-rose-500 dark:text-rose-450 font-sans">
+                                  Bloqueado
+                                </span>
+                              )}
+                            </div>
                           )}
                         </div>
-                      )}
-                    </td>
+                      </td>
 
-                    {/* Role selector directly */}
-                    <td className="py-4 px-6">
-                      {item.email === 'admin@portal.com' ? (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-mono font-black tracking-wider bg-brand/10 text-brand dark:bg-brand/20 dark:text-brand-light border border-brand/20">
-                          <Shield className="h-3.5 w-3.5" />
-                          ADMIN GERAL
-                        </span>
-                      ) : (
-                        <div className="space-y-1.5">
-                          <div className="relative inline-block w-40">
-                            <select
-                              id={`select-role-${item.email}`}
-                              value={item.role}
-                              onChange={(e) => handleChangeRole(item.email, e.target.value as any)}
-                              className="w-full bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-950 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-850 rounded-xl py-1.5 px-3 text-[11px] font-bold font-mono text-zinc-700 dark:text-zinc-300 transition-colors focus:outline-none focus:ring-2 focus:ring-brand/20"
-                            >
-                              <option value="cliente">CLIENTE (RESTRITO)</option>
-                              <option value="parceiro">PARCEIRO (ATIVIDADES)</option>
-                              <option value="analista">ANALISTA (FORNECEDORES & LPU)</option>
-                              <option value="editor">EDITOR (CADASTRO)</option>
-                              <option value="admin">ADMIN (ADMINISTRADOR)</option>
-                            </select>
-                          </div>
-                          {item.role === 'cliente' && (
-                            <div className="flex flex-col gap-1 text-[10px] font-mono font-medium max-w-[200px]">
-                              <span className="text-zinc-405 dark:text-zinc-500 font-semibold leading-tight">
-                                Secretarias: <span className="font-bold text-brand dark:text-brand-light">{(item.secretarias || []).length}</span> liberação/ões
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingSecretapiasUser(item);
-                                  setEditingUserSecretapias(item.secretarias || []);
-                                }}
-                                className="flex items-center gap-1 text-[10px] text-brand hover:underline font-bold font-sans tracking-tight cursor-pointer"
-                              >
-                                <Settings className="h-3 w-3 shrink-0" />
-                                <span>Liberar Secretarias</span>
-                              </button>
-                            </div>
-                          )}
-                          {item.role === 'parceiro' && (
-                            <div className="flex flex-col gap-1 text-[10px] font-mono font-medium max-w-[200px]">
-                              <span className="text-zinc-405 dark:text-zinc-500 font-semibold leading-tight">
-                                Parceiro: <span className="font-bold text-emerald-600 dark:text-emerald-400">{item.parceiroNome || 'Nenhum associado'}</span>
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingParceiroUser(item);
-                                  setSelectedParceiroModalId(item.parceiroId || '');
-                                }}
-                                className="flex items-center gap-1 text-[10px] text-brand hover:underline font-bold font-sans tracking-tight cursor-pointer"
-                              >
-                                <Settings className="h-3 w-3 shrink-0" />
-                                <span>Associar Parceiro</span>
-                              </button>
-                            </div>
-                          )}
-
-                          <div className="flex flex-col gap-1 text-[10px] font-mono font-medium max-w-[200px] mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
-                            <span className="text-zinc-405 dark:text-zinc-500 font-semibold leading-tight">
-                              Telas Permitidas: <span className="font-bold text-brand dark:text-brand-light">{(item.allowedScreens || getDefaultScreensForRole(item.role)).length}</span> / 10
-                            </span>
+                      {/* Delete and Reset Password actions */}
+                      <td className="py-3 px-4 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          {isCurrentUserAdmin && (
                             <button
-                              type="button"
+                              id={`btn-edit-user-trigger-${item.email}`}
                               onClick={() => {
-                                setEditingScreensUser(item);
-                                setEditingUserScreens(item.allowedScreens || getDefaultScreensForRole(item.role));
+                                setEditingUser(item);
+                                setEditDisplayName(item.displayName);
+                                setEditRole(item.role);
+                                setEditStatus(item.status || 'Ativo');
+                                setEditSecretarias(item.secretarias || []);
+                                setEditParceiroId(item.parceiroId || '');
+                                setEditAllowedScreens(item.allowedScreens || getDefaultScreensForRole(item.role));
+                                setEditUserSearchSecTerm('');
                               }}
-                              className="flex items-center gap-1 text-[10px] text-brand hover:underline font-bold font-sans tracking-tight cursor-pointer"
+                              className="p-1.5 text-zinc-400 hover:text-brand hover:bg-brand/10 dark:hover:bg-brand/25 rounded-lg cursor-pointer transition-colors inline-flex items-center justify-center"
+                              title="Editar dados e permissões do usuário"
                             >
-                              <ShieldCheck className="h-3 w-3 shrink-0 text-brand" />
-                              <span>Customizar Telas</span>
+                              <Pencil className="h-4 w-4" />
                             </button>
-                          </div>
+                          )}
+
+                          {isCurrentUserAdmin && (
+                            <button
+                              id={`btn-reset-password-trigger-${item.email}`}
+                              onClick={() => {
+                                setResetPasswordUser(item);
+                                setProvisionalPassword('');
+                              }}
+                              className="p-1.5 text-zinc-400 hover:text-brand hover:bg-brand/10 dark:hover:bg-brand/25 rounded-lg cursor-pointer transition-colors inline-flex items-center justify-center"
+                              title="Resetar senha provisória"
+                            >
+                              <KeyRound className="h-4 w-4" />
+                            </button>
+                          )}
+
+                          {item.email === 'admin@portal.com' ? (
+                            <span className="text-[10px] text-zinc-400 dark:text-zinc-550 uppercase font-mono font-bold tracking-wider">Imutável</span>
+                          ) : (
+                            <button
+                              id={`btn-delete-user-${item.email}`}
+                              onClick={() => handleDeleteUser(item.email)}
+                              className="p-1.5 text-zinc-400 hover:text-rose-600 hover:bg-rose-500/10 dark:hover:bg-rose-500/25 rounded-lg cursor-pointer transition-colors inline-flex items-center justify-center"
+                              title="Remover usuário completamente"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
                         </div>
-                      )}
-                    </td>
+                      </td>
 
-                    {/* Status Badge */}
-                    <td className="py-4 px-6 text-center">
-                      <div className="inline-flex justify-center w-full">
-                        {item.status === 'Ativo' ? (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            Ativo
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-500/10 text-rose-500 dark:text-rose-450 border border-rose-500/20">
-                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                            Bloqueado
-                          </span>
-                        )}
-                      </div>
-                    </td>
-
-                    {/* Enable / Disable toggle switch */}
-                    <td className="py-4 px-6 text-center">
-                      <div className="inline-flex justify-center items-center w-full">
-                        {item.email === 'admin@portal.com' ? (
-                          <span className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest font-mono">Restrito</span>
-                        ) : (
-                          <button
-                            id={`btn-toggle-status-${item.email}`}
-                            onClick={() => handleToggleStatus(item.email)}
-                            role="switch"
-                            aria-checked={item.status === 'Ativo'}
-                            className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand/20 ${
-                              item.status === 'Ativo' ? 'bg-brand' : 'bg-zinc-200 dark:bg-zinc-800'
-                            }`}
-                            title={item.status === 'Ativo' ? 'Clique para Bloquear Acesso' : 'Clique para Liberar Acesso'}
-                          >
-                            <span
-                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
-                                item.status === 'Ativo' ? 'translate-x-5' : 'translate-x-0'
-                              }`}
-                            />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-
-                    {/* Delete and Reset Password actions */}
-                    <td className="py-4 px-6 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {isCurrentUserAdmin && (
-                          <button
-                            id={`btn-edit-user-trigger-${item.email}`}
-                            onClick={() => {
-                              setEditingUser(item);
-                              setEditDisplayName(item.displayName);
-                              setEditRole(item.role);
-                              setEditStatus(item.status || 'Ativo');
-                              setEditSecretarias(item.secretarias || []);
-                              setEditParceiroId(item.parceiroId || '');
-                              setEditAllowedScreens(item.allowedScreens || getDefaultScreensForRole(item.role));
-                              setEditUserSearchSecTerm('');
-                            }}
-                            className="p-1.5 text-zinc-400 hover:text-brand hover:bg-brand/10 dark:hover:bg-brand/25 rounded-lg cursor-pointer transition-colors inline-flex items-center justify-center"
-                            title="Editar dados e permissões do usuário"
-                          >
-                            <Pencil className="h-4.5 w-4.5" />
-                          </button>
-                        )}
-
-                        {isCurrentUserAdmin && (
-                          <button
-                            id={`btn-reset-password-trigger-${item.email}`}
-                            onClick={() => {
-                              setResetPasswordUser(item);
-                              setProvisionalPassword('');
-                            }}
-                            className="p-1.5 text-zinc-400 hover:text-brand hover:bg-brand/10 dark:hover:bg-brand/25 rounded-lg cursor-pointer transition-colors inline-flex items-center justify-center"
-                            title="Resetar senha provisória"
-                          >
-                            <KeyRound className="h-4.5 w-4.5" />
-                          </button>
-                        )}
-
-                        {item.email === 'admin@portal.com' ? (
-                          <span className="text-[10px] text-zinc-400 dark:text-zinc-550 uppercase font-mono font-bold tracking-wider">Imutável</span>
-                        ) : (
-                          <button
-                            id={`btn-delete-user-${item.email}`}
-                            onClick={() => handleDeleteUser(item.email)}
-                            className="p-1.5 text-zinc-400 hover:text-rose-600 hover:bg-rose-500/10 dark:hover:bg-rose-500/25 rounded-lg cursor-pointer transition-colors inline-flex items-center justify-center"
-                            title="Remover usuário completamente"
-                          >
-                            <Trash2 className="h-4.5 w-4.5" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-
-                  </tr>
-                ))
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

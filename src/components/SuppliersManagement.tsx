@@ -4,6 +4,7 @@ import {
   Users, 
   MapPin, 
   Phone, 
+  Mail,
   DollarSign, 
   Plus, 
   Trash2, 
@@ -24,9 +25,10 @@ import {
   ChevronDown,
   ChevronUp
 } from 'lucide-react';
-import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType, onSnapshot, setDoc, deleteDoc } from '../firebase';
+import { collection, doc } from 'firebase/firestore';
 import { Supplier, LpuItem, LpuSettings, UserSession } from '../types';
+import { useCurrentMonthFilter, getAvailableMonths } from '../utils/monthUtils';
 
 interface SuppliersManagementProps {
   currentUser: UserSession;
@@ -36,21 +38,8 @@ interface SuppliersManagementProps {
 export default function SuppliersManagement({ currentUser, activeSection = 'parceiros' }: SuppliersManagementProps) {
   const isAdmin = currentUser.role === 'admin' || currentUser.role === 'analista';
 
-  const [referenceMonth, setReferenceMonth] = useState('Junho/2026');
-  const availableMonths = [
-    'Janeiro/2026',
-    'Fevereiro/2026',
-    'Março/2026',
-    'Abril/2026',
-    'Maio/2026',
-    'Junho/2026',
-    'Julho/2026',
-    'Agosto/2026',
-    'Setembro/2026',
-    'Outubro/2026',
-    'Novembro/2026',
-    'Dezembro/2026'
-  ];
+  const [referenceMonth, setReferenceMonth] = useCurrentMonthFilter();
+  const availableMonths = getAvailableMonths();
 
   // State for Suppliers
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -60,9 +49,11 @@ export default function SuppliersManagement({ currentUser, activeSection = 'parc
   const [showSupplierForm, setShowSupplierForm] = useState(false);
   
   // Supplier Form state
+  const [supplierCustomCode, setSupplierCustomCode] = useState('');
   const [supplierName, setSupplierName] = useState('');
   const [supplierCompany, setSupplierCompany] = useState('');
   const [supplierContact, setSupplierContact] = useState('');
+  const [supplierEmail, setSupplierEmail] = useState('');
   const [supplierCpf, setSupplierCpf] = useState('');
   const [supplierCnpj, setSupplierCnpj] = useState('');
   const [supplierAddress, setSupplierAddress] = useState('');
@@ -182,9 +173,11 @@ export default function SuppliersManagement({ currentUser, activeSection = 'parc
 
   // Reset supplier form fields
   const resetSupplierForm = () => {
+    setSupplierCustomCode('');
     setSupplierName('');
     setSupplierCompany('');
     setSupplierContact('');
+    setSupplierEmail('');
     setSupplierCpf('');
     setSupplierCnpj('');
     setSupplierAddress('');
@@ -202,12 +195,28 @@ export default function SuppliersManagement({ currentUser, activeSection = 'parc
       return;
     }
 
-    const docId = editingSupplierId || `sup_${Date.now()}`;
+    const customCode = supplierCustomCode.trim().toUpperCase();
+    if (!customCode) {
+      showToast("Por favor, informe o código do parceiro.", "error");
+      return;
+    }
+
+    const docId = editingSupplierId || `sup_${customCode}`;
+
+    if (!editingSupplierId) {
+      const exists = suppliers.some(s => s.id.toLowerCase() === docId.toLowerCase());
+      if (exists) {
+        showToast("Este código de parceiro já está em uso.", "error");
+        return;
+      }
+    }
+
     const supplierData: Supplier = {
       id: docId,
       nome: supplierName.trim(),
       empresa: supplierCompany.trim(),
       contato: supplierContact.trim(),
+      email: supplierEmail.trim(),
       cpf: supplierCpf.trim(),
       cnpj: supplierCnpj.trim(),
       endereco: supplierAddress.trim(),
@@ -228,9 +237,11 @@ export default function SuppliersManagement({ currentUser, activeSection = 'parc
   // Edit Supplier Trigger
   const handleEditSupplier = (sup: Supplier) => {
     setEditingSupplierId(sup.id);
+    setSupplierCustomCode(sup.id.replace('sup_', ''));
     setSupplierName(sup.nome);
     setSupplierCompany(sup.empresa || '');
     setSupplierContact(sup.contato);
+    setSupplierEmail(sup.email || '');
     setSupplierCpf(sup.cpf);
     setSupplierCnpj(sup.cnpj);
     setSupplierAddress(sup.endereco);
@@ -587,6 +598,23 @@ export default function SuppliersManagement({ currentUser, activeSection = 'parc
                   </div>
 
                   <form onSubmit={handleSubmitSupplier} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Código do Parceiro */}
+                    <div className="space-y-1.5">
+                      <label className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
+                        Código do Parceiro (Cod. Parceiro) <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        disabled={isEditingSupplier}
+                        placeholder="Ex: MED, METODO-01, SL-03"
+                        value={supplierCustomCode}
+                        onChange={(e) => setSupplierCustomCode(e.target.value.toUpperCase())}
+                        className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-800 dark:text-zinc-200 placeholder-zinc-400 focus:border-brand outline-none transition-all font-mono uppercase disabled:opacity-60 disabled:cursor-not-allowed disabled:text-zinc-500 disabled:dark:text-zinc-400"
+                        title={isEditingSupplier ? "O código do parceiro não pode ser alterado após o cadastro" : "Digite o código único do parceiro"}
+                      />
+                    </div>
+
                     {/* Nome */}
                     <div className="space-y-1.5">
                       <label className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
@@ -619,13 +647,27 @@ export default function SuppliersManagement({ currentUser, activeSection = 'parc
                     {/* Contato */}
                     <div className="space-y-1.5">
                       <label className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
-                        Contato (Telefone / E-mail)
+                        Contato (Telefone)
                       </label>
                       <input
                         type="text"
-                        placeholder="Ex: (81) 98888-7777 ou comercial@metodo.com"
+                        placeholder="Ex: (81) 98888-7777"
                         value={supplierContact}
                         onChange={(e) => setSupplierContact(e.target.value)}
+                        className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-800 dark:text-zinc-200 placeholder-zinc-400 focus:border-brand outline-none transition-all font-sans"
+                      />
+                    </div>
+
+                    {/* Email */}
+                    <div className="space-y-1.5">
+                      <label className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
+                        Email corporativo
+                      </label>
+                      <input
+                        type="email"
+                        placeholder="Ex: comercial@metodo.com"
+                        value={supplierEmail}
+                        onChange={(e) => setSupplierEmail(e.target.value)}
                         className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-800 dark:text-zinc-200 placeholder-zinc-400 focus:border-brand outline-none transition-all font-sans"
                       />
                     </div>
@@ -741,11 +783,13 @@ export default function SuppliersManagement({ currentUser, activeSection = 'parc
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/50">
+                      <th className="px-4 py-3 text-[10px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 font-sans">Cod. Parceiro</th>
                       <th className="px-4 py-3 text-[10px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 font-sans">Parceiro</th>
                       <th className="px-4 py-3 text-[10px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 font-sans">Empresa</th>
                       <th className="px-4 py-3 text-[10px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 font-sans">CNPJ</th>
                       <th className="px-4 py-3 text-[10px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 font-sans">CPF</th>
                       <th className="px-4 py-3 text-[10px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 font-sans">Contato</th>
+                      <th className="px-4 py-3 text-[10px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 font-sans">Email</th>
                       <th className="px-4 py-3 text-[10px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 font-sans">Endereço</th>
                       {isAdmin && <th className="px-4 py-3 text-right text-[10px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 font-sans">Ações</th>}
                     </tr>
@@ -753,13 +797,20 @@ export default function SuppliersManagement({ currentUser, activeSection = 'parc
                   <tbody className="divide-y divide-zinc-150 dark:divide-zinc-800/50">
                     {filteredSuppliers.length === 0 ? (
                       <tr>
-                        <td colSpan={isAdmin ? 7 : 6} className="px-4 py-10 text-center text-xs text-zinc-500 italic font-sans">
+                        <td colSpan={isAdmin ? 9 : 8} className="px-4 py-10 text-center text-xs text-zinc-500 italic font-sans">
                           Nenhum parceiro registrado ou correspondente à busca.
                         </td>
                       </tr>
                     ) : (
                     filteredSuppliers.map((sup) => (
                       <tr key={sup.id} className="hover:bg-brand/5 dark:hover:bg-zinc-900/40 transition-colors group">
+                        {/* Cod. Parceiro */}
+                        <td className="px-4 py-3.5">
+                          <span className="inline-flex items-center text-zinc-600 dark:text-zinc-300 font-mono text-[10px] font-black bg-zinc-100 dark:bg-zinc-800/80 px-2 py-1 rounded-lg">
+                            {sup.id.replace('sup_', '')}
+                          </span>
+                        </td>
+
                         {/* Nome do Parceiro */}
                         <td className="px-4 py-3.5">
                           <span className="block text-xs font-bold text-zinc-800 dark:text-zinc-100 font-sans group-hover:text-brand transition-colors">
@@ -811,6 +862,18 @@ export default function SuppliersManagement({ currentUser, activeSection = 'parc
                             <div className="flex items-center gap-1.5 text-zinc-700 dark:text-zinc-300">
                               <Phone className="h-3 w-3 text-zinc-400 dark:text-zinc-500 shrink-0" />
                               <span className="text-[11px] font-medium font-sans leading-none">{sup.contato}</span>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-zinc-450 italic font-sans">-</span>
+                          )}
+                        </td>
+
+                        {/* Email */}
+                        <td className="px-4 py-3.5">
+                          {sup.email ? (
+                            <div className="flex items-center gap-1.5 text-zinc-750 dark:text-zinc-300">
+                              <Mail className="h-3 w-3 text-zinc-400 dark:text-zinc-500 shrink-0" />
+                              <span className="text-[11px] font-mono leading-none truncate max-w-[150px]" title={sup.email}>{sup.email}</span>
                             </div>
                           ) : (
                             <span className="text-[10px] text-zinc-450 italic font-sans">-</span>

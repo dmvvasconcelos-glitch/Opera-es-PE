@@ -23,18 +23,22 @@ import {
   Info,
   Wrench,
   Wifi,
-  FileSpreadsheet
+  FileSpreadsheet,
+  ShieldAlert
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
-import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch, getDoc } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType, onSnapshot, getDoc, setDoc, deleteDoc, writeBatch } from '../firebase';
+import { collection, doc } from 'firebase/firestore';
+import { UserSession } from '../types';
+import { useCurrentMonthFilter, getCurrentMonth, getAvailableMonths } from '../utils/monthUtils';
 
 interface VectraOS {
   id: string;
   referenceMonth: string;
   date: string;
   protocol: string;
+  sdm?: string;
   location: string;
   description: string;
   category: 'wifi' | 'utm';
@@ -45,7 +49,7 @@ interface VectraOS {
 const generateMockRecords = (): VectraOS[] => {
   const result: VectraOS[] = [];
   
-  // 65 Wifi records (crossing the 63 limit by 2 to demonstrate overage)
+  // 65 Wifi/UTM records (crossing the 60 limit by 5 to demonstrate overage)
   for (let i = 1; i <= 65; i++) {
     const dayNum = (i % 28) + 1;
     const day = String(dayNum).padStart(2, '0');
@@ -54,6 +58,7 @@ const generateMockRecords = (): VectraOS[] => {
       referenceMonth: 'Junho/2026',
       date: `2026-06-${day}`,
       protocol: String(1200000 + i),
+      sdm: `SDM-${105400 + i}`,
       location: `Escola Estadual ${['Antônio Farias', 'Guedes Alcoforado', 'Nossa Senhora', 'Cabrobó Centro', 'Sertão Feliz', 'Agrestina Alta'][i % 6]}`,
       description: 'Manutenção técnica de antena de ponto de acesso Wifi e homologação de sinal',
       category: 'wifi',
@@ -61,7 +66,7 @@ const generateMockRecords = (): VectraOS[] => {
     });
   }
 
-  // 15 UTM records (fully within the 74 limit to show under/in-franchise usage)
+  // 15 additional Wifi/UTM records to demonstrate full month usage
   for (let i = 1; i <= 15; i++) {
     const dayNum = (i % 28) + 1;
     const day = String(dayNum).padStart(2, '0');
@@ -70,9 +75,10 @@ const generateMockRecords = (): VectraOS[] => {
       referenceMonth: 'Junho/2026',
       date: `2026-06-${day}`,
       protocol: String(3400000 + i),
+      sdm: `SDM-${308100 + i}`,
       location: `Gerência Regional ${['Recife Centro', 'Agreste Caruaru', 'Sertão Petrolina', 'Zona da Mata Goiana'][i % 4]}`,
       description: 'Varredura e manutenção corretiva de firewall de segurança de borda UTM',
-      category: 'utm',
+      category: 'wifi',
       solution: 'Revisão das regras NAT, aplicação de patch de segurança contra vulnerabilidades e carga de firmware'
     });
   }
@@ -80,8 +86,24 @@ const generateMockRecords = (): VectraOS[] => {
   return result;
 };
 
-export default function VectraBilling() {
-  const [referenceMonth, setReferenceMonth] = useState('Junho/2026');
+export default function VectraBilling({ user }: { user?: UserSession | null }) {
+  if (!user || (user.role !== 'admin' && user.role !== 'editor' && user.role !== 'viewer' && !user.allowedScreens?.includes('vectra'))) {
+    return (
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-8 text-center space-y-4 max-w-md mx-auto my-12 shadow-xs">
+        <div className="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center mx-auto">
+          <ShieldAlert className="h-6 w-6" />
+        </div>
+        <div className="space-y-1.5">
+          <h3 className="text-lg font-black text-zinc-900 dark:text-white font-sans tracking-tight">Acesso Não Autorizado</h3>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 font-sans font-medium leading-relaxed">
+            Seu perfil de usuário ({user?.role || 'convidado'}) não possui permissão para visualizar estas faturas e relatórios confidenciais de telecomunicações corporativas.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const [referenceMonth, setReferenceMonth] = useCurrentMonthFilter();
   const isZeroMonthSelected = referenceMonth === 'Janeiro/2026' || referenceMonth === 'Fevereiro/2026';
   const [records, setRecords] = useState<VectraOS[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -89,19 +111,19 @@ export default function VectraBilling() {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   const [vectraPrices, setVectraPrices] = useState({
-    limitWifi: 63,
-    baseCostWifi: 0.0,
-    excedenteWifi: 0.0,
-    limitUtm: 74,
+    limitWifi: 60,
+    baseCostWifi: 39400.20,
+    excedenteWifi: 590.00,
+    limitUtm: 0,
     baseCostUtm: 0.0,
     excedenteUtm: 0.0
   });
 
   const [showConfig, setShowConfig] = useState(false);
-  const [configLimitWifi, setConfigLimitWifi] = useState(63);
-  const [configBaseCostWifi, setConfigBaseCostWifi] = useState(0.0);
-  const [configExcedenteWifi, setConfigExcedenteWifi] = useState(0.0);
-  const [configLimitUtm, setConfigLimitUtm] = useState(74);
+  const [configLimitWifi, setConfigLimitWifi] = useState(60);
+  const [configBaseCostWifi, setConfigBaseCostWifi] = useState(39400.20);
+  const [configExcedenteWifi, setConfigExcedenteWifi] = useState(590.00);
+  const [configLimitUtm, setConfigLimitUtm] = useState(0);
   const [configBaseCostUtm, setConfigBaseCostUtm] = useState(0.0);
   const [configExcedenteUtm, setConfigExcedenteUtm] = useState(0.0);
 
@@ -120,11 +142,34 @@ export default function VectraBilling() {
     const unsubscribe = onSnapshot(pricesDocRef, async (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
+        let limitWifiVal = Number(data.limitWifi ?? 60);
+        let baseCostWifiVal = Number(data.baseCostWifi ?? 39400.20);
+        let excedenteWifiVal = Number(data.excedenteWifi ?? 590.00);
+
+        // Auto-migrate if database still has old values (e.g. limit is 63 or baseCost is 0)
+        if (limitWifiVal === 63 || baseCostWifiVal === 0.0) {
+          limitWifiVal = 60;
+          baseCostWifiVal = 39400.20;
+          excedenteWifiVal = 590.00;
+          try {
+            await setDoc(pricesDocRef, {
+              limitWifi: 60,
+              baseCostWifi: 39400.20,
+              excedenteWifi: 590.00,
+              limitUtm: 0,
+              baseCostUtm: 0.0,
+              excedenteUtm: 0.0
+            });
+          } catch (e) {
+            console.error("Auto-migrating Vectra prices failed:", e);
+          }
+        }
+
         setVectraPrices({
-          limitWifi: Number(data.limitWifi ?? 63),
-          baseCostWifi: Number(data.baseCostWifi ?? 0.0),
-          excedenteWifi: Number(data.excedenteWifi ?? 0.0),
-          limitUtm: Number(data.limitUtm ?? 74),
+          limitWifi: limitWifiVal,
+          baseCostWifi: baseCostWifiVal,
+          excedenteWifi: excedenteWifiVal,
+          limitUtm: Number(data.limitUtm ?? 0),
           baseCostUtm: Number(data.baseCostUtm ?? 0.0),
           excedenteUtm: Number(data.excedenteUtm ?? 0.0)
         });
@@ -134,10 +179,10 @@ export default function VectraBilling() {
           return;
         }
         const defaultZero = {
-          limitWifi: 63,
-          baseCostWifi: 0.0,
-          excedenteWifi: 0.0,
-          limitUtm: 74,
+          limitWifi: 60,
+          baseCostWifi: 39400.20,
+          excedenteWifi: 590.00,
+          limitUtm: 0,
           baseCostUtm: 0.0,
           excedenteUtm: 0.0
         };
@@ -189,11 +234,12 @@ export default function VectraBilling() {
     return `${y}-${m}-${d}`;
   });
   const [formProtocol, setFormProtocol] = useState('');
+  const [formSdm, setFormSdm] = useState('');
   const [formLocation, setFormLocation] = useState('');
   const [formDescription, setFormDescription] = useState('');
   const [formCategory, setFormCategory] = useState<'wifi' | 'utm'>('wifi');
   const [formSolution, setFormSolution] = useState('');
-  const [formReferenceMonth, setFormReferenceMonth] = useState('Junho/2026');
+  const [formReferenceMonth, setFormReferenceMonth] = useState(getCurrentMonth);
 
   // Sync form default reference month with page-level referenceMonth
   useEffect(() => {
@@ -226,6 +272,13 @@ export default function VectraBilling() {
           return;
         }
 
+        if (localStorage.getItem('vectra_seeded_v1') === 'true') {
+          console.log("Database cleared of Vectra records by preference, skipping automatic seeding.");
+          setRecords([]);
+          setIsLoading(false);
+          return;
+        }
+
         let isAlreadySeededDB = false;
         try {
           const seedMetaDoc = await getDoc(doc(db, 'test', 'seeding_metadata'));
@@ -236,7 +289,7 @@ export default function VectraBilling() {
           console.warn("Could not retrieve remote seeding metadata for Vectra:", smErr);
         }
 
-        if (isAlreadySeededDB || localStorage.getItem('vectra_seeded_v1') === 'true') {
+        if (isAlreadySeededDB) {
           console.log("Database cleared of Vectra records by preference, skipping automatic seeding.");
           setRecords([]);
           setIsLoading(false);
@@ -245,6 +298,7 @@ export default function VectraBilling() {
         }
         // Seed the preselected mock entries to Firestore using writeBatch
         try {
+          localStorage.setItem('vectra_seeded_v1', 'true');
           const batch = writeBatch(db);
           const generated = generateMockRecords();
           generated.forEach((item) => {
@@ -257,7 +311,6 @@ export default function VectraBilling() {
           batch.set(seedMetaRef, { vectra: true }, { merge: true });
 
           await batch.commit();
-          localStorage.setItem('vectra_seeded_v1', 'true');
         } catch (error) {
           console.error("Error seeding Vectra records to Firestore:", error);
         }
@@ -276,20 +329,7 @@ export default function VectraBilling() {
   }, []);
 
   // Months lists
-  const availableMonths = [
-    'Janeiro/2026',
-    'Fevereiro/2026',
-    'Março/2026',
-    'Abril/2026',
-    'Maio/2026',
-    'Junho/2026',
-    'Julho/2026',
-    'Agosto/2026',
-    'Setembro/2026',
-    'Outubro/2026',
-    'Novembro/2026',
-    'Dezembro/2026'
-  ];
+  const availableMonths = getAvailableMonths();
 
   // Active records for currently selected month, sorted chronologically for exact franchise-overage index mapping
   const monthRecords = useMemo(() => {
@@ -298,25 +338,18 @@ export default function VectraBilling() {
   }, [records, referenceMonth, isZeroMonthSelected]);
 
   const wifiSorted = useMemo(() => {
-    return monthRecords
-      .filter(r => r.category === 'wifi')
+    return [...monthRecords]
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   }, [monthRecords]);
 
   const utmSorted = useMemo(() => {
-    return monthRecords
-      .filter(r => r.category === 'utm')
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }, [monthRecords]);
+    return [] as VectraOS[];
+  }, []);
 
   // Combined records for list output (honoring filter tabs)
   const filteredRecordsToDisplay = useMemo(() => {
-    if (activeSubTab === 'wifi') return wifiSorted;
-    if (activeSubTab === 'utm') return utmSorted;
-
-    // Concat both sorted lists so the index inside their respective arrays can still be evaluated
-    return [...wifiSorted, ...utmSorted].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }, [wifiSorted, utmSorted, activeSubTab]);
+    return wifiSorted;
+  }, [wifiSorted]);
 
   // Statistics and Calculations
   const stats = useMemo(() => {
@@ -338,31 +371,29 @@ export default function VectraBilling() {
     }
     const wifiCount = wifiSorted.length;
     const utmCount = utmSorted.length;
+    const totalCount = wifiCount + utmCount;
 
-    const excessWifi = Math.max(0, wifiCount - vectraPrices.limitWifi);
-    const excessUtm = Math.max(0, utmCount - vectraPrices.limitUtm);
+    const limitCombined = Number(vectraPrices.limitWifi ?? 60);
+    const baseCostCombined = Number(vectraPrices.baseCostWifi ?? 39400.20);
+    const excedenteCombined = Number(vectraPrices.excedenteWifi ?? 590.00);
 
-    const costExcessWifi = excessWifi * vectraPrices.excedenteWifi;
-    const costExcessUtm = excessUtm * vectraPrices.excedenteUtm;
-
-    const totalWifiCost = vectraPrices.baseCostWifi + costExcessWifi;
-    const totalUtmCost = vectraPrices.baseCostUtm + costExcessUtm;
-
-    const grandTotal = totalWifiCost + totalUtmCost;
+    const excessCombined = Math.max(0, totalCount - limitCombined);
+    const totalExcessCost = excessCombined * excedenteCombined;
+    const grandTotal = baseCostCombined + totalExcessCost;
 
     return {
       wifiCount,
       utmCount,
-      excessWifi,
-      excessUtm,
-      costExcessWifi,
-      costExcessUtm,
-      totalWifiCost,
-      totalUtmCost,
+      excessWifi: excessCombined,
+      excessUtm: 0,
+      costExcessWifi: totalExcessCost,
+      costExcessUtm: 0,
+      totalWifiCost: grandTotal,
+      totalUtmCost: 0,
       grandTotal,
-      totalExcessCount: excessWifi + excessUtm,
-      totalExcessCost: costExcessWifi + costExcessUtm,
-      totalCount: wifiCount + utmCount
+      totalExcessCount: excessCombined,
+      totalExcessCost,
+      totalCount
     };
   }, [wifiSorted, utmSorted, isZeroMonthSelected, vectraPrices]);
 
@@ -379,6 +410,8 @@ export default function VectraBilling() {
       showToast("O protocolo deve conter exatamente 7 dígitos numéricos.", "error");
       return;
     }
+
+    const cleanSdm = formSdm.trim();
 
     if (!formLocation.trim()) {
       showToast("Localização é obrigatória.", "error");
@@ -407,6 +440,7 @@ export default function VectraBilling() {
         referenceMonth: formReferenceMonth,
         date: formDate,
         protocol: cleanProtocol,
+        sdm: cleanSdm,
         location: formLocation,
         description: formDescription,
         category: formCategory,
@@ -434,6 +468,7 @@ export default function VectraBilling() {
         referenceMonth: formReferenceMonth,
         date: formDate,
         protocol: cleanProtocol,
+        sdm: cleanSdm,
         location: formLocation,
         description: formDescription,
         category: formCategory,
@@ -457,6 +492,7 @@ export default function VectraBilling() {
 
   const resetForm = () => {
     setFormProtocol('');
+    setFormSdm('');
     setFormLocation('');
     setFormDescription('');
     setFormSolution('');
@@ -470,6 +506,7 @@ export default function VectraBilling() {
     setEditingId(os.id);
     setFormDate(os.date);
     setFormProtocol(os.protocol);
+    setFormSdm(os.sdm || '');
     setFormLocation(os.location);
     setFormDescription(os.description);
     setFormCategory(os.category);
@@ -530,13 +567,9 @@ export default function VectraBilling() {
 
   // Check if a specific record is excess
   const isRecordExcedent = (item: VectraOS) => {
-    if (item.category === 'wifi') {
-      const idx = wifiSorted.findIndex(r => r.id === item.id);
-      return idx >= vectraPrices.limitWifi;
-    } else {
-      const idx = utmSorted.findIndex(r => r.id === item.id);
-      return idx >= vectraPrices.limitUtm;
-    }
+    const sortedAll = [...monthRecords].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    const idx = sortedAll.findIndex(r => r.id === item.id);
+    return idx >= (vectraPrices.limitWifi ?? 60);
   };
 
   // Excel Export Handler
@@ -552,20 +585,12 @@ export default function VectraBilling() {
         ['RESUMO DE AUDITORIA E FRANQUIAS'],
         ['Item de Faturamento', 'Limite Franquia', 'Quantidade Registrada', 'Quantidade Excedente', 'Valor Base Franquia', 'Valor Total Faturado'],
         [
-          'Manutenção Ponto de Acesso - Wifi', 
+          'Franquia de Manutenção Wifi/UTM', 
           `${vectraPrices.limitWifi} OS`, 
-          stats.wifiCount, 
+          stats.totalCount, 
           stats.excessWifi, 
           formatBRL(vectraPrices.baseCostWifi), 
-          formatBRL(stats.totalWifiCost)
-        ],
-        [
-          'Manutenção UTM de Segurança', 
-          `${vectraPrices.limitUtm} OS`, 
-          stats.utmCount, 
-          stats.excessUtm, 
-          formatBRL(vectraPrices.baseCostUtm), 
-          formatBRL(stats.totalUtmCost)
+          formatBRL(stats.grandTotal)
         ],
         ['VALOR TOTAL A FATURAR', '', '', '', '', formatBRL(stats.grandTotal)]
       ];
@@ -576,35 +601,37 @@ export default function VectraBilling() {
 
       // Wifi Details Table
       if (wifiSorted.length > 0) {
-        const rows = wifiSorted.map((r, i) => ({
+        const rows = wifiSorted.map((r) => ({
           'DATA': r.date ? new Date(r.date + 'T00:00:00').toLocaleDateString('pt-BR') : '',
           'PROTOCOLO': r.protocol,
+          'SDM': r.sdm || '',
           'LOCAL': r.location,
           'CATEGORIA': 'Manutenção Wifi',
           'DESCRIÇÃO': r.description,
           'SOLUÇÃO': r.solution,
-          'EXCEDENTE?': i >= vectraPrices.limitWifi ? 'Sim' : 'Não (Incluso na Franquia)',
-          'VALOR UNITÁRIO EXCEDENTE': i >= vectraPrices.limitWifi ? formatBRL(vectraPrices.excedenteWifi) : 'R$ 0,00'
+          'EXCEDENTE?': isRecordExcedent(r) ? 'Sim' : 'Não (Incluso na Franquia)',
+          'VALOR UNITÁRIO EXCEDENTE': isRecordExcedent(r) ? formatBRL(vectraPrices.excedenteWifi) : 'R$ 0,00'
         }));
         const wsDetail = XLSX.utils.json_to_sheet(rows);
-        wsDetail['!cols'] = [{ wch: 12 }, { wch: 15 }, { wch: 30 }, { wch: 18 }, { wch: 45 }, { wch: 45 }, { wch: 25 }, { wch: 25 }];
+        wsDetail['!cols'] = [{ wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 30 }, { wch: 18 }, { wch: 45 }, { wch: 45 }, { wch: 25 }, { wch: 25 }];
         XLSX.utils.book_append_sheet(wb, wsDetail, 'Chamados Wifi');
       }
 
       // UTM Details Table
       if (utmSorted.length > 0) {
-        const rows = utmSorted.map((r, i) => ({
+        const rows = utmSorted.map((r) => ({
           'DATA': r.date ? new Date(r.date + 'T00:00:00').toLocaleDateString('pt-BR') : '',
           'PROTOCOLO': r.protocol,
+          'SDM': r.sdm || '',
           'LOCAL': r.location,
           'CATEGORIA': 'Manutenção UTM',
           'DESCRIÇÃO': r.description,
           'SOLUÇÃO': r.solution,
-          'EXCEDENTE?': i >= vectraPrices.limitUtm ? 'Sim' : 'Não (Incluso na Franquia)',
-          'VALOR UNITÁRIO EXCEDENTE': i >= vectraPrices.limitUtm ? formatBRL(vectraPrices.excedenteUtm) : 'R$ 0,00'
+          'EXCEDENTE?': isRecordExcedent(r) ? 'Sim' : 'Não (Incluso na Franquia)',
+          'VALOR UNITÁRIO EXCEDENTE': isRecordExcedent(r) ? formatBRL(vectraPrices.excedenteWifi) : 'R$ 0,00'
         }));
         const wsDetail = XLSX.utils.json_to_sheet(rows);
-        wsDetail['!cols'] = [{ wch: 12 }, { wch: 15 }, { wch: 30 }, { wch: 18 }, { wch: 45 }, { wch: 45 }, { wch: 25 }, { wch: 25 }];
+        wsDetail['!cols'] = [{ wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 30 }, { wch: 18 }, { wch: 45 }, { wch: 45 }, { wch: 25 }, { wch: 25 }];
         XLSX.utils.book_append_sheet(wb, wsDetail, 'Chamados UTM');
       }
 
@@ -647,7 +674,7 @@ export default function VectraBilling() {
 
       // Executive Financial summary layout
       doc.setFillColor(244, 244, 245); // zinc-100
-      doc.roundedRect(15, y, 180, 52, 3, 3, 'F');
+      doc.roundedRect(15, y, 180, 38, 3, 3, 'F');
 
       doc.setTextColor(24, 24, 27);
       doc.setFont("helvetica", "bold");
@@ -662,36 +689,25 @@ export default function VectraBilling() {
       doc.setFontSize(8.5);
       doc.setTextColor(63, 63, 70); // zinc-700
 
-      // Wifi Franquia & Overage
-      doc.text(`1. Franquia AP Wifi (${vectraPrices.limitWifi} chamados inclusos):`, 20, y + 18);
+      // Wifi/UTM Franquia & Overage
+      doc.text(`1. Franquia Wifi/UTM (${vectraPrices.limitWifi} chamados inclusos):`, 20, y + 18);
       doc.setFont("helvetica", "bold");
       doc.text(formatBRL(vectraPrices.baseCostWifi), 150, y + 18);
 
       doc.setFont("helvetica", "normal");
-      doc.text(`- Excedentes AP Wifi (${stats.excessWifi} chamados faturados):`, 20, y + 24);
+      doc.text(`- Excedentes Wifi/UTM (${stats.excessCount} chamados faturados):`, 20, y + 24);
       doc.setFont("helvetica", "bold");
-      doc.text(formatBRL(stats.costExcessWifi), 150, y + 24);
+      doc.text(formatBRL(stats.totalExcessCost), 150, y + 24);
 
-      // UTM Franquia & Overage
-      doc.setFont("helvetica", "normal");
-      doc.text(`2. Franquia UTM (${vectraPrices.limitUtm} chamados inclusos):`, 20, y + 31);
-      doc.setFont("helvetica", "bold");
-      doc.text(formatBRL(vectraPrices.baseCostUtm), 150, y + 31);
-
-      doc.setFont("helvetica", "normal");
-      doc.text(`- Excedentes UTM (${stats.excessUtm} chamados faturados):`, 20, y + 37);
-      doc.setFont("helvetica", "bold");
-      doc.text(formatBRL(stats.costExcessUtm), 150, y + 37);
-
-      doc.line(20, y + 41, 190, y + 41);
+      doc.line(20, y + 28, 190, y + 28);
 
       doc.setFont("helvetica", "bold");
       doc.setFontSize(11);
       doc.setTextColor(24, 24, 27);
-      doc.text("TOTAL GERAL A FATURAR VECTRA:", 20, y + 47);
-      doc.text(formatBRL(stats.grandTotal), 150, y + 47);
+      doc.text("TOTAL GERAL A FATURAR VECTRA:", 20, y + 33);
+      doc.text(formatBRL(stats.grandTotal), 150, y + 33);
 
-      y += 63;
+      y += 48;
 
       // Table detailing selected O.S
       doc.setTextColor(17, 24, 39);
@@ -705,12 +721,13 @@ export default function VectraBilling() {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(7.5);
       doc.setTextColor(75, 85, 99);
-      doc.text("Data", 17, y);
-      doc.text("Protocolo", 35, y);
-      doc.text("Local", 52, y);
-      doc.text("Categoria", 95, y);
-      doc.text("Faturamento", 132, y);
-      doc.text("Descrição do Serviço", 163, y);
+      doc.text("Data", 15, y);
+      doc.text("Protocolo", 32, y);
+      doc.text("SDM", 48, y);
+      doc.text("Local", 62, y);
+      doc.text("Categoria", 100, y);
+      doc.text("Faturamento", 135, y);
+      doc.text("Descrição do Serviço", 168, y);
 
       doc.line(15, y + 2, 195, y + 2);
       y += 6;
@@ -732,41 +749,43 @@ export default function VectraBilling() {
             doc.setFont("helvetica", "bold");
             doc.setFontSize(7.5);
             doc.setTextColor(75, 85, 99);
-            doc.text("Data", 17, y);
-            doc.text("Protocolo", 35, y);
-            doc.text("Local", 52, y);
-            doc.text("Categoria", 95, y);
-            doc.text("Faturamento", 132, y);
-            doc.text("Descrição do Serviço", 163, y);
+            doc.text("Data", 15, y);
+            doc.text("Protocolo", 32, y);
+            doc.text("SDM", 48, y);
+            doc.text("Local", 62, y);
+            doc.text("Categoria", 100, y);
+            doc.text("Faturamento", 135, y);
+            doc.text("Descrição do Serviço", 168, y);
             doc.line(15, y + 2, 195, y + 2);
             y += 6;
           }
 
-          const localFormatted = r.location.length > 20 ? r.location.substring(0, 18) + '..' : r.location;
-          const descFormatted = r.description.length > 18 ? r.description.substring(0, 16) + '..' : r.description;
+          const localFormatted = r.location.length > 18 ? r.location.substring(0, 16) + '..' : r.location;
+          const descFormatted = r.description.length > 15 ? r.description.substring(0, 13) + '..' : r.description;
           const isExcess = isRecordExcedent(r);
 
           doc.setFont("helvetica", "bold");
           const ptDate = r.date ? new Date(r.date + 'T00:00:00').toLocaleDateString('pt-BR') : '-';
-          doc.text(ptDate, 17, y);
-          doc.text(r.protocol, 35, y);
+          doc.text(ptDate, 15, y);
+          doc.text(r.protocol, 32, y);
+          doc.text(r.sdm || '-', 48, y);
           doc.setFont("helvetica", "normal");
-          doc.text(localFormatted, 52, y);
-          doc.text(r.category === 'wifi' ? 'Manut. Wifi' : 'Manut. UTM', 95, y);
+          doc.text(localFormatted, 62, y);
+          doc.text(r.category === 'wifi' ? 'Manut. Wifi' : 'Manut. UTM', 100, y);
           
           doc.setFont("helvetica", "bold");
           if (isExcess) {
             doc.setTextColor(185, 28, 28); // red
             const excValue = r.category === 'wifi' ? vectraPrices.excedenteWifi : vectraPrices.excedenteUtm;
-            doc.text("Excedente UI " + formatBRL(excValue).replace('R$', '').trim(), 132, y);
+            doc.text("Excedente UI " + formatBRL(excValue).replace('R$', '').trim(), 135, y);
           } else {
             doc.setTextColor(21, 128, 61); // green
-            doc.text("Franquia (Incluso)", 132, y);
+            doc.text("Franquia (Incluso)", 135, y);
           }
           doc.setTextColor(17, 24, 39);
 
           doc.setFont("helvetica", "normal");
-          doc.text(descFormatted, 163, y);
+          doc.text(descFormatted, 168, y);
 
           y += 6.2;
         });
@@ -942,32 +961,29 @@ export default function VectraBilling() {
             Configure as regras de franquia, limites de ordens de serviço (OS) e os respectivos valores financeiros. Os valores iniciam zerados pré-homologação e serão atualizados e consolidados em tempo real no dashboard.
           </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Secção Wifi */}
-            <div className="space-y-4 p-4 rounded-2.5xl bg-zinc-50/50 dark:bg-zinc-950/40 border border-zinc-200/50 dark:border-zinc-850/50">
-              <h4 className="text-xs font-black text-zinc-800 dark:text-zinc-200 uppercase tracking-wider pb-1 border-b border-zinc-150 dark:border-zinc-800/50">
-                Ponto de Acesso Wifi
-              </h4>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="space-y-1">
-                  <label className="block text-[10px] text-zinc-400 font-bold uppercase">Limite Franquia</label>
-                  <input
-                    type="number"
-                    value={configLimitWifi}
-                    onChange={(e) => setConfigLimitWifi(Math.max(0, parseInt(e.target.value) || 0))}
-                    className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-850 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
-                  />
-                </div>
-                <div className="space-y-1 sm:col-span-2">
-                  <label className="block text-[10px] text-zinc-400 font-bold uppercase">Custo Base Franquia (R$)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={configBaseCostWifi}
-                    onChange={(e) => setConfigBaseCostWifi(Math.max(0, parseFloat(e.target.value) || 0))}
-                    className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-850 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
-                  />
-                </div>
+          <div className="space-y-4 p-5 rounded-2.5xl bg-zinc-50/50 dark:bg-zinc-950/40 border border-zinc-200/50 dark:border-zinc-850/50 max-w-2xl mx-auto">
+            <h4 className="text-xs font-black text-zinc-800 dark:text-zinc-200 uppercase tracking-wider pb-1 border-b border-zinc-150 dark:border-zinc-800/50">
+              Franquia Wifi/UTM
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="space-y-1">
+                <label className="block text-[10px] text-zinc-400 font-bold uppercase">Limite Franquia</label>
+                <input
+                  type="number"
+                  value={configLimitWifi}
+                  onChange={(e) => setConfigLimitWifi(Math.max(0, parseInt(e.target.value) || 0))}
+                  className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-850 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="block text-[10px] text-zinc-400 font-bold uppercase">Custo Base Franquia (R$)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={configBaseCostWifi}
+                  onChange={(e) => setConfigBaseCostWifi(Math.max(0, parseFloat(e.target.value) || 0))}
+                  className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-850 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                />
               </div>
               <div className="space-y-1">
                 <label className="block text-[10px] text-zinc-400 font-bold uppercase">Valor OS Excedente (R$)</label>
@@ -976,44 +992,6 @@ export default function VectraBilling() {
                   step="0.01"
                   value={configExcedenteWifi}
                   onChange={(e) => setConfigExcedenteWifi(Math.max(0, parseFloat(e.target.value) || 0))}
-                  className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-850 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
-                />
-              </div>
-            </div>
-
-            {/* Secção UTM */}
-            <div className="space-y-4 p-4 rounded-2.5xl bg-zinc-50/50 dark:bg-zinc-950/40 border border-zinc-200/50 dark:border-zinc-850/50">
-              <h4 className="text-xs font-black text-zinc-800 dark:text-zinc-200 uppercase tracking-wider pb-1 border-b border-zinc-150 dark:border-zinc-800/50">
-                Segurança UTM
-              </h4>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="space-y-1">
-                  <label className="block text-[10px] text-zinc-400 font-bold uppercase">Limite Franquia</label>
-                  <input
-                    type="number"
-                    value={configLimitUtm}
-                    onChange={(e) => setConfigLimitUtm(Math.max(0, parseInt(e.target.value) || 0))}
-                    className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-850 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
-                  />
-                </div>
-                <div className="space-y-1 sm:col-span-2">
-                  <label className="block text-[10px] text-zinc-400 font-bold uppercase">Custo Base Franquia (R$)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={configBaseCostUtm}
-                    onChange={(e) => setConfigBaseCostUtm(Math.max(0, parseFloat(e.target.value) || 0))}
-                    className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-850 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
-                  />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <label className="block text-[10px] text-zinc-400 font-bold uppercase">Valor OS Excedente (R$)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={configExcedenteUtm}
-                  onChange={(e) => setConfigExcedenteUtm(Math.max(0, parseFloat(e.target.value) || 0))}
                   className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-850 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
                 />
               </div>
@@ -1045,52 +1023,32 @@ export default function VectraBilling() {
         Consolas de Franquia do Contrato ({referenceMonth})
       </h2>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Card 1: AP Wifi Base Contract */}
         <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200/85 dark:border-zinc-800/85 p-5 space-y-3 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold text-[#B6202F] dark:text-[#df3c4e] bg-[#B6202F]/10 dark:bg-[#B6202F]/20 px-2 py-0.5 rounded-md font-mono">
-              Wifi (Limite: {vectraPrices.limitWifi} OS)
+              Franquia Wifi/UTM (Limite: {vectraPrices.limitWifi} OS)
             </span>
             <Wifi className="h-4 w-4 text-zinc-400" />
           </div>
           <div>
-            <span className="block text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Ponto de Acesso Wifi</span>
+            <span className="block text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Custo Fixo Mensal</span>
             <span className="block text-lg font-black text-zinc-900 dark:text-white mt-0.5">
               {formatBRL(vectraPrices.baseCostWifi)}
             </span>
             <span className="text-[11px] font-mono text-zinc-400 mt-1 block leading-relaxed">
-              <strong>{stats.wifiCount}</strong> chamados regist.
+              <strong>{stats.totalCount}</strong> chamados regist.
               {stats.excessWifi > 0 && <span className="text-rose-500 font-bold ml-1">({stats.excessWifi} excedent.)</span>}
             </span>
           </div>
         </div>
 
-        {/* Card 2: UTM Base Contract */}
-        <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200/85 dark:border-zinc-800/85 p-5 space-y-3 shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold text-sky-600 dark:text-sky-400 bg-sky-500/10 dark:bg-sky-500/20 px-2 py-0.5 rounded-md font-mono">
-              UTM (Limite: {vectraPrices.limitUtm} OS)
-            </span>
-            <ShieldCheck className="h-4 w-4 text-zinc-400" />
-          </div>
-          <div>
-            <span className="block text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Manutenção UTM</span>
-            <span className="block text-lg font-black text-zinc-900 dark:text-white mt-0.5">
-              {formatBRL(vectraPrices.baseCostUtm)}
-            </span>
-            <span className="text-[11px] font-mono text-zinc-400 mt-1 block leading-relaxed">
-              <strong>{stats.utmCount}</strong> chamados regist.
-              {stats.excessUtm > 0 && <span className="text-rose-500 font-bold ml-1">({stats.excessUtm} excedent.)</span>}
-            </span>
-          </div>
-        </div>
-
-        {/* Card 3: Excedentes Faturados */}
+        {/* Card 2: Excedentes Faturados */}
         <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200/85 dark:border-zinc-800/85 p-5 space-y-3 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 dark:bg-rose-500/20 px-2 py-0.5 rounded-md font-mono">
-              Wifi Exc: {formatBRL(vectraPrices.excedenteWifi)} | UTM: {formatBRL(vectraPrices.excedenteUtm)}
+              Exc: {formatBRL(vectraPrices.excedenteWifi)} / OS
             </span>
             <Zap className="h-4 w-4 text-rose-500" />
           </div>
@@ -1100,12 +1058,12 @@ export default function VectraBilling() {
               {formatBRL(stats.totalExcessCost)}
             </span>
             <span className="text-[11px] font-mono text-zinc-400 mt-1 block leading-relaxed">
-              {stats.totalExcessCount} OS avulsas taxadas
+              {stats.excessWifi} OS avulsas taxadas
             </span>
           </div>
         </div>
 
-        {/* Card 4: Faturamento Total */}
+        {/* Card 3: Faturamento Total */}
         <div className="bg-[#B6202F] dark:bg-[#901621] text-white rounded-3xl border border-[#B6202F] p-5 space-y-3 shadow-lg shadow-[#B6202F]/15">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 bg-white/20 text-white rounded font-mono">
@@ -1128,7 +1086,7 @@ export default function VectraBilling() {
       {/* OS Form section */}
       <div id="vectra-os-form" className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-black text-zinc-850 dark:text-zinc-150 uppercase tracking-wider">
+          <h2 className="text-sm font-black text-zinc-850 dark:text-zinc-200 uppercase tracking-wider">
             Painel Operacional Vectra
           </h2>
           {!showForm && (
@@ -1163,7 +1121,7 @@ export default function VectraBilling() {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               {/* DATE */}
               <div>
                 <label className="block text-[11px] font-black uppercase text-zinc-400 tracking-wider mb-1.5 font-mono">
@@ -1200,7 +1158,7 @@ export default function VectraBilling() {
               {/* PROTOCOLO */}
               <div>
                 <label className="block text-[11px] font-black uppercase text-zinc-400 tracking-wider mb-1.5 font-mono">
-                  PROTOCOLO / Nº OS (7 DÍGITOS)
+                  PROTOCOLO / Nº OS
                 </label>
                 <input
                   type="text"
@@ -1212,6 +1170,20 @@ export default function VectraBilling() {
                     setFormProtocol(val);
                   }}
                   required
+                  className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-[#B6202F]"
+                />
+              </div>
+
+              {/* SDM */}
+              <div>
+                <label className="block text-[11px] font-black uppercase text-zinc-400 tracking-wider mb-1.5 font-mono">
+                  SDM / CHAMADO
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: SDM-123456"
+                  value={formSdm}
+                  onChange={(e) => setFormSdm(e.target.value)}
                   className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-[#B6202F]"
                 />
               </div>
@@ -1232,27 +1204,9 @@ export default function VectraBilling() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              {/* CATEGORY */}
-              <div className="md:col-span-1">
-                <label className="block text-[11px] font-black uppercase text-zinc-400 tracking-wider mb-1.5 font-mono">
-                  CATEGORIA DE CONTRATO
-                </label>
-                <div className="relative">
-                  <select
-                    value={formCategory}
-                    onChange={(e) => setFormCategory(e.target.value as 'wifi' | 'utm')}
-                    className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-[#B6202F] appearance-none cursor-pointer pr-10"
-                  >
-                    <option value="wifi">Ponto de Acesso - Wifi (Franquia de 63)</option>
-                    <option value="utm">Manutenção UTM (Franquia de 74)</option>
-                  </select>
-                  <ChevronDown className="absolute right-3.5 top-3 h-4 w-4 text-zinc-400 pointer-events-none" />
-                </div>
-              </div>
-
+             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               {/* DESCRIPTION */}
-              <div className="md:col-span-2">
+              <div className="md:col-span-3">
                 <label className="block text-[11px] font-black uppercase text-zinc-400 tracking-wider mb-1.5 font-mono">
                   DESCRIÇÃO DO SERVIÇO
                 </label>
@@ -1325,39 +1279,6 @@ export default function VectraBilling() {
                 <span>Limpar Mês</span>
               </button>
             )}
-
-            <div className="flex items-center bg-zinc-50 dark:bg-zinc-950 p-1 rounded-xl border border-zinc-200/80 dark:border-zinc-850/80">
-              <button
-                onClick={() => setActiveSubTab('all')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  activeSubTab === 'all' 
-                    ? 'bg-white dark:bg-zinc-900 text-[#B6202F] shadow-xs' 
-                    : 'text-zinc-450 hover:text-zinc-905 dark:hover:text-white'
-                }`}
-              >
-                Todos ({stats.totalCount})
-              </button>
-              <button
-                onClick={() => setActiveSubTab('wifi')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  activeSubTab === 'wifi' 
-                    ? 'bg-white dark:bg-zinc-900 text-[#B6202F] shadow-xs' 
-                    : 'text-zinc-450 hover:text-zinc-905 dark:hover:text-white'
-                }`}
-              >
-                Wifi ({stats.wifiCount})
-              </button>
-              <button
-                onClick={() => setActiveSubTab('utm')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  activeSubTab === 'utm' 
-                    ? 'bg-white dark:bg-zinc-900 text-[#B6202F] shadow-xs' 
-                    : 'text-zinc-450 hover:text-zinc-905 dark:hover:text-white'
-                }`}
-              >
-                UTM ({stats.utmCount})
-              </button>
-            </div>
           </div>
         </div>
 
@@ -1368,6 +1289,7 @@ export default function VectraBilling() {
               <tr className="border-b border-zinc-150 dark:border-zinc-800 text-[10px] font-bold uppercase font-mono text-zinc-400 tracking-wider">
                 <th className="py-3 px-2">DATA</th>
                 <th className="py-3 px-2">PROTOCOLO</th>
+                <th className="py-3 px-2">SDM</th>
                 <th className="py-3 px-2">LOCAL</th>
                 <th className="py-3 px-2">DESCRIÇÃO DO SERVIÇO</th>
                 <th className="py-3 px-2">CATEGORIA</th>
@@ -1380,7 +1302,7 @@ export default function VectraBilling() {
             <tbody className="divide-y divide-zinc-100/60 dark:divide-zinc-800/50">
               {filteredRecordsToDisplay.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-8 text-center text-xs text-zinc-400 font-sans">
+                  <td colSpan={10} className="py-8 text-center text-xs text-zinc-400 font-sans">
                     Nenhuma ordem de serviço cadastrada neste filtro ou mês de referência.
                   </td>
                 </tr>
@@ -1399,6 +1321,11 @@ export default function VectraBilling() {
                         {item.protocol}
                       </td>
 
+                      {/* SDM */}
+                      <td className="py-3 px-2 font-mono text-xs text-zinc-500 dark:text-zinc-400">
+                        {item.sdm || '-'}
+                      </td>
+
                       {/* LOCAL */}
                       <td className="py-3 px-2 text-xs font-bold text-zinc-700 dark:text-zinc-300">
                         {item.location}
@@ -1411,12 +1338,8 @@ export default function VectraBilling() {
 
                       {/* CATEGORIA */}
                       <td className="py-3 px-2 text-xs">
-                        <span className={`inline-block text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
-                          item.category === 'wifi' 
-                            ? 'bg-[#B6202F]/10 text-[#B6202F]'
-                            : 'bg-sky-500/10 text-sky-600'
-                        }`}>
-                          {item.category === 'wifi' ? 'Wifi' : 'UTM'}
+                        <span className="inline-block text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-[#B6202F]/10 text-[#B6202F]">
+                          Wifi/UTM
                         </span>
                       </td>
 
@@ -1436,7 +1359,7 @@ export default function VectraBilling() {
 
                       {/* FATURAMENTO */}
                       <td className="py-3 px-2 text-xs text-right font-mono font-black text-zinc-800 dark:text-white">
-                        {isExcess ? formatBRL(item.category === 'wifi' ? vectraPrices.excedenteWifi : vectraPrices.excedenteUtm) : formatBRL(0)}
+                        {isExcess ? formatBRL(vectraPrices.excedenteWifi) : formatBRL(0)}
                       </td>
 
                       {/* ACTIONS */}
@@ -1473,8 +1396,8 @@ export default function VectraBilling() {
             <h4 className="text-xs font-bold text-zinc-900 dark:text-white">Regras de Franquia e Excedentes - Contrato Vectra</h4>
             <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed font-sans">
               O faturamento da Vectra obedece aos limites de chamados contratados:
-              A franquia mensal de <strong>Manutenção Ponto de Acesso - Wifi</strong> é de <strong>{vectraPrices.limitWifi} chamados</strong> ao custo fixo de <strong>{formatBRL(vectraPrices.baseCostWifi)}</strong>, e a franquia de <strong>Manutenção UTM</strong> é de <strong>{vectraPrices.limitUtm} chamados</strong> ao custo fixo de <strong>{formatBRL(vectraPrices.baseCostUtm)}</strong>.
-              Cada chamado adicional (excedente) verificado em auditoria física é tarifado no valor unitário complementar de <strong>{formatBRL(vectraPrices.excedenteWifi)}</strong> (Wifi) ou <strong>{formatBRL(vectraPrices.excedenteUtm)}</strong> (UTM).
+              A franquia mensal de <strong>Manutenção Wifi/UTM</strong> é de <strong>{vectraPrices.limitWifi} chamados</strong> ao custo unitário de <strong>R$ 656,67</strong> por cada OS da franquia, totalizando o custo fixo de <strong>{formatBRL(vectraPrices.baseCostWifi)}</strong>.
+              Cada chamado adicional (excedente) verificado em auditoria física é tarifado no valor unitário de <strong>{formatBRL(vectraPrices.excedenteWifi)}</strong> por OS excedente.
             </p>
           </div>
         </div>

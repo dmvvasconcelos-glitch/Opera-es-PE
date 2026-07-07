@@ -4,9 +4,10 @@
  */
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { db, handleFirestoreError, OperationType, cleanUndefined } from '../firebase';
-import { collection, doc, onSnapshot, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType, cleanUndefined, onSnapshot, getDocs, setDoc, deleteDoc } from '../firebase';
+import { collection, doc } from 'firebase/firestore';
 import { Supplier, LpuItem, LpuSettings, UserSession } from '../types';
+import { useCurrentMonthFilter, getAvailableMonths } from '../utils/monthUtils';
 import { BRAZIL_STATES_AND_CITIES, estimateDistanceBetweenCities, loadAllCoordinates } from '../data/brazilCities';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
@@ -68,23 +69,10 @@ export default function AtividadesManagement({ currentUser }: AtividadesManageme
   const isAdmin = currentUser.role === 'admin' || currentUser.role === 'editor' || currentUser.role === 'analista';
   const canWrite = isAdmin || currentUser.role === 'parceiro';
 
-  const [referenceMonth, setReferenceMonth] = useState('Junho/2026');
+  const [referenceMonth, setReferenceMonth] = useCurrentMonthFilter();
   const [editingActivityId, setEditingActivityId] = useState<string | null>(null);
 
-  const availableMonths = [
-    'Janeiro/2026',
-    'Fevereiro/2026',
-    'Março/2026',
-    'Abril/2026',
-    'Maio/2026',
-    'Junho/2026',
-    'Julho/2026',
-    'Agosto/2026',
-    'Setembro/2026',
-    'Outubro/2026',
-    'Novembro/2026',
-    'Dezembro/2026'
-  ];
+  const availableMonths = getAvailableMonths();
 
   const getReferenceMonthFromDate = (dateStr: string) => {
     if (!dateStr) return '';

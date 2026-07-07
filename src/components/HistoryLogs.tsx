@@ -653,7 +653,7 @@ export default function HistoryLogs({ user }: HistoryLogsProps) {
                       return (
                         <tr key={c.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-850/20 text-zinc-700 dark:text-zinc-300">
                           <td className="py-2 px-3.5 font-black font-mono text-zinc-950 dark:text-zinc-100">{c.contrato}</td>
-                          <td className="py-2 px-3.5 font-semibold text-zinc-900 dark:text-zinc-150">{c.secretaria}</td>
+                          <td className="py-2 px-3.5 font-semibold text-zinc-900 dark:text-zinc-200">{c.secretaria}</td>
                           <td className="py-2 px-3 text-right font-black font-mono text-zinc-900 dark:text-zinc-300">{pvfCount}</td>
                           <td className="py-2 px-3.5 text-right font-black font-mono text-emerald-800 dark:text-emerald-400">{formatCurrency(faturamento)}</td>
                           <td className="py-2 px-3.5 text-center">
