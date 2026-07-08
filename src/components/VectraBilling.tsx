@@ -146,19 +146,27 @@ export default function VectraBilling({ user }: { user?: UserSession | null }) {
         let baseCostWifiVal = Number(data.baseCostWifi ?? 39400.20);
         let excedenteWifiVal = Number(data.excedenteWifi ?? 590.00);
 
-        // Auto-migrate if database still has old values (e.g. limit is 63 or baseCost is 0)
-        if (limitWifiVal === 63 || baseCostWifiVal === 0.0) {
+        const needsMigration = (limitWifiVal === 63 || baseCostWifiVal === 0.0);
+
+        if (limitWifiVal === 63) {
           limitWifiVal = 60;
+        }
+        if (baseCostWifiVal === 0.0) {
           baseCostWifiVal = 39400.20;
+        }
+        if (excedenteWifiVal === 0.0) {
           excedenteWifiVal = 590.00;
+        }
+
+        if (needsMigration) {
           try {
             await setDoc(pricesDocRef, {
               limitWifi: 60,
               baseCostWifi: 39400.20,
               excedenteWifi: 590.00,
-              limitUtm: 0,
-              baseCostUtm: 0.0,
-              excedenteUtm: 0.0
+              limitUtm: Number(data.limitUtm ?? 0),
+              baseCostUtm: Number(data.baseCostUtm ?? 0.0),
+              excedenteUtm: Number(data.excedenteUtm ?? 0.0)
             });
           } catch (e) {
             console.error("Auto-migrating Vectra prices failed:", e);

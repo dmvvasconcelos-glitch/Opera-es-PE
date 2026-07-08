@@ -344,7 +344,11 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
   const [vectraPrices, setVectraPrices] = useState(() => {
     try {
       const cached = localStorage.getItem('vectra_prices_cache');
-      if (cached) return JSON.parse(cached);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.limitWifi === 63) parsed.limitWifi = 60;
+        return parsed;
+      }
     } catch (e) {}
     return {
       limitWifi: 60,
@@ -353,6 +357,33 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
       limitUtm: 0,
       baseCostUtm: 0.0,
       excedenteUtm: 0.0
+    };
+  });
+
+  const [umTelecomPrices, setUmTelecomPrices] = useState(() => {
+    try {
+      const cached = localStorage.getItem('umtelecom_prices_cache');
+      if (cached) return JSON.parse(cached);
+    } catch (e) {}
+    return {
+      franchiseBaseCost: 19939.75,
+      limitBasica: 10,
+      limitCritica: 5,
+      costExcedente: 1499.35,
+      costManutencao: 1102.35,
+      costAtivacao: 2548.75
+    };
+  });
+
+  const [starlinkPrices, setStarlinkPrices] = useState(() => {
+    try {
+      const cached = localStorage.getItem('starlink_prices_cache');
+      if (cached) return JSON.parse(cached);
+    } catch (e) {}
+    return {
+      costInterior: 1760.00,
+      costNoronha: 1820.00,
+      costNovoPcm: 3500.00
     };
   });
 
@@ -739,6 +770,57 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
     return () => unsubscribe();
   }, []);
 
+  // Setup Real-time listener for Um Telecom Prices dynamically
+  useEffect(() => {
+    const pricesDocRef = doc(db, 'systemPrices', 'umtelecom');
+    const unsubscribe = onSnapshot(pricesDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const pObj = {
+          franchiseBaseCost: Number(data.franchiseBaseCost ?? 19939.75),
+          limitBasica: Number(data.limitBasica ?? 10),
+          limitCritica: Number(data.limitCritica ?? 5),
+          costExcedente: Number(data.costExcedente ?? 1499.35),
+          costManutencao: Number(data.costManutencao ?? 1102.35),
+          costAtivacao: Number(data.costAtivacao ?? 2548.75)
+        };
+        setUmTelecomPrices(pObj);
+        localStorage.setItem('umtelecom_prices_cache', JSON.stringify(pObj));
+      }
+    }, (error) => {
+      console.error("Dashboard error on snapshot for systemPrices/umtelecom:", error);
+      const cached = localStorage.getItem('umtelecom_prices_cache');
+      if (cached) {
+        setUmTelecomPrices(JSON.parse(cached));
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Setup Real-time listener for Starlink Prices dynamically
+  useEffect(() => {
+    const pricesDocRef = doc(db, 'systemPrices', 'starlink');
+    const unsubscribe = onSnapshot(pricesDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const pObj = {
+          costInterior: Number(data.costInterior ?? 1760.00),
+          costNoronha: Number(data.costNoronha ?? 1820.00),
+          costNovoPcm: Number(data.costNovoPcm ?? 3500.00)
+        };
+        setStarlinkPrices(pObj);
+        localStorage.setItem('starlink_prices_cache', JSON.stringify(pObj));
+      }
+    }, (error) => {
+      console.error("Dashboard error on snapshot for systemPrices/starlink:", error);
+      const cached = localStorage.getItem('starlink_prices_cache');
+      if (cached) {
+        setStarlinkPrices(JSON.parse(cached));
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
   // Setup Real-time listener for Contact Center Records dynamically
   useEffect(() => {
     const collectionRef = collection(db, 'contactCenterRecords');
@@ -975,14 +1057,20 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
     const maintenanceCount = activeRecords.filter(r => r.category === 'manutencao_pcm').length;
     const activationCount = activeRecords.filter(r => r.category === 'ativacao_pcm').length;
     
-    const excessBasica = Math.max(0, basicCount - 10);
-    const excessCritica = Math.max(0, criticalCount - 5);
-    const valueExcess = (excessBasica + excessCritica) * 1499.35;
-    const valueMaintenance = maintenanceCount * 1102.35;
-    const valueActivations = activationCount * 2548.75;
+    const limitBas = Number(umTelecomPrices.limitBasica ?? 10);
+    const limitCrit = Number(umTelecomPrices.limitCritica ?? 5);
+    const costExc = Number(umTelecomPrices.costExcedente ?? 1499.35);
+    const costManut = Number(umTelecomPrices.costManutencao ?? 1102.35);
+    const costAtiv = Number(umTelecomPrices.costAtivacao ?? 2548.75);
+    const baseFranchise = Number(umTelecomPrices.franchiseBaseCost ?? 19939.75);
+
+    const excessBasica = Math.max(0, basicCount - limitBas);
+    const excessCritica = Math.max(0, criticalCount - limitCrit);
+    const valueExcess = (excessBasica + excessCritica) * costExc;
+    const valueMaintenance = maintenanceCount * costManut;
+    const valueActivations = activationCount * costAtiv;
     
-    // Standard franchise base cost of 19,939.75 is always paid per month
-    const grandTotal = 19939.75 + valueExcess + valueMaintenance + valueActivations;
+    const grandTotal = baseFranchise + valueExcess + valueMaintenance + valueActivations;
     
     return {
       grandTotal,
@@ -994,7 +1082,7 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
       excessCritica,
       totalCount: activeRecords.length
     };
-  }, [dbUmRecords, referenceMonth, isZeroMonthSelected]);
+  }, [dbUmRecords, referenceMonth, isZeroMonthSelected, umTelecomPrices]);
 
   // 1.2 Starlink Billing Calculation for selected reference month
   const starlinkStats = useMemo(() => {
@@ -1019,17 +1107,21 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
     let countNoronha = 0;
     let countPCM = 0;
     
+    const prInterior = Number(starlinkPrices.costInterior ?? 1760.00);
+    const prNoronha = Number(starlinkPrices.costNoronha ?? 1820.00);
+    const prPCM = Number(starlinkPrices.costNovoPcm ?? 3500.00);
+
     activeRecords.forEach((r: any) => {
       const sol = r.solution === 'Novo PCM (Ativação)' ? 'Ativação PCM' : r.solution;
       if (sol === 'Interior') {
         countInterior++;
-        costInterior += Number(r.billingValue || 1760.00);
+        costInterior += prInterior;
       } else if (sol === 'Noronha') {
         countNoronha++;
-        costNoronha += Number(r.billingValue || 1820.00);
+        costNoronha += prNoronha;
       } else if (sol === 'Ativação PCM') {
         countPCM++;
-        costPCM += Number(r.billingValue || 3500.00);
+        costPCM += prPCM;
       }
     });
     
@@ -1042,7 +1134,7 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
       countPCM,
       totalCount: activeRecords.length
     };
-  }, [dbStarlinkRecords, referenceMonth, isZeroMonthSelected]);
+  }, [dbStarlinkRecords, referenceMonth, isZeroMonthSelected, starlinkPrices]);
 
   const vectraStats = useMemo(() => {
     if (isZeroMonthSelected) {
@@ -2040,7 +2132,7 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
               <div className="border-t border-zinc-105 dark:border-zinc-800/65 pt-3 flex flex-col gap-1.5 font-mono text-[10.5px]">
                 <div className="flex items-center justify-between text-zinc-500">
                   <span>Franquia Base PCM:</span>
-                  <span className="text-zinc-800 dark:text-white font-bold">R$ 19.939,75</span>
+                  <span className="text-zinc-800 dark:text-white font-bold">{Number(umTelecomPrices.franchiseBaseCost ?? 19939.75).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                 </div>
                 <div className="flex items-center justify-between text-zinc-500">
                   <span>O.S. Elétrica (Básica):</span>

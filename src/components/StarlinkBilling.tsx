@@ -21,6 +21,7 @@ import {
   Wrench,
   Wifi,
   FileSpreadsheet,
+  Sliders,
   ShieldAlert
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -35,6 +36,8 @@ interface StarlinkOS {
   referenceMonth: string;
   date: string;
   protocol: string;
+  relatedOs?: string;
+  sdm?: string;
   location: string;
   description: string;
   solution: 'Interior' | 'Noronha' | 'Ativação PCM';
@@ -53,6 +56,7 @@ const PRESEEDED_STARLINK_RECORDS: StarlinkOS[] = [
     referenceMonth: 'Junho/2026',
     date: '2026-06-02',
     protocol: '1205521',
+    sdm: 'SDM-551020',
     location: 'Escola Padre Sertão (Cabrobó)',
     description: 'Ativação e alinhamento de antena de satélite mais homologação física',
     solution: 'Interior',
@@ -63,6 +67,7 @@ const PRESEEDED_STARLINK_RECORDS: StarlinkOS[] = [
     referenceMonth: 'Junho/2026',
     date: '2026-06-03',
     protocol: '1209014',
+    sdm: 'SDM-551021',
     location: 'Unidade de Atendimento Noronha (Vila dos Remédios)',
     description: 'Recalibração do feedhorn de foco e ajuste lógico com satélite ativo',
     solution: 'Noronha',
@@ -73,6 +78,7 @@ const PRESEEDED_STARLINK_RECORDS: StarlinkOS[] = [
     referenceMonth: 'Junho/2026',
     date: '2026-06-05',
     protocol: '1201139',
+    sdm: 'SDM-551022',
     location: 'Escola Central Petrolina (Distrito Rural)',
     description: 'Infraestrutura extra do PCM e lançamento de ativação de modem redundante',
     solution: 'Ativação PCM',
@@ -83,6 +89,7 @@ const PRESEEDED_STARLINK_RECORDS: StarlinkOS[] = [
     referenceMonth: 'Junho/2026',
     date: '2026-06-12',
     protocol: '1203011',
+    sdm: 'SDM-551023',
     location: 'Escola Municipal Solidária (Inajá)',
     description: 'Ativação do canal LEO do PECONECTADO II com fixação metálica em telhado',
     solution: 'Interior',
@@ -112,6 +119,43 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
   const [records, setRecords] = useState<StarlinkOS[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Dynamic pricing state for Starlink
+  const [starlinkPrices, setStarlinkPrices] = useState({
+    costInterior: 1760.00,
+    costNoronha: 1820.00,
+    costNovoPCM: 3500.00
+  });
+
+  // Tariff adjustment configuration form states
+  const [showConfig, setShowConfig] = useState(false);
+  const [configCostInterior, setConfigCostInterior] = useState(1760.00);
+  const [configCostNoronha, setConfigCostNoronha] = useState(1820.00);
+  const [configCostNovoPCM, setConfigCostNovoPCM] = useState(3500.00);
+
+  // Sync Starlink prices in real-time from Firestore systemPrices collection
+  useEffect(() => {
+    const unsubscribePrices = onSnapshot(doc(db, 'systemPrices', 'starlink'), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setStarlinkPrices({
+          costInterior: Number(data.costInterior) || 1760.00,
+          costNoronha: Number(data.costNoronha) || 1820.00,
+          costNovoPCM: Number(data.costNovoPCM) || 3500.00
+        });
+      }
+    });
+    return () => unsubscribePrices();
+  }, []);
+
+  // Update configuration form states when settings panel opens or active price updates
+  useEffect(() => {
+    if (showConfig) {
+      setConfigCostInterior(starlinkPrices.costInterior);
+      setConfigCostNoronha(starlinkPrices.costNoronha);
+      setConfigCostNovoPCM(starlinkPrices.costNovoPCM);
+    }
+  }, [showConfig, starlinkPrices]);
+
   // Form Controls
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -125,6 +169,7 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
     return `${y}-${m}-${d}`;
   });
   const [formProtocol, setFormProtocol] = useState('');
+  const [formRelatedOs, setFormRelatedOs] = useState('');
   const [formLocation, setFormLocation] = useState('');
   const [formDescription, setFormDescription] = useState('');
   const [formSolution, setFormSolution] = useState<'Interior' | 'Noronha' | 'Ativação PCM'>('Interior');
@@ -141,11 +186,11 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
   // Sync form default pricing when solution changes (unless in edit mode with a loaded value)
   useEffect(() => {
     if (!editingId) {
-      if (formSolution === 'Interior') setFormBillingValue(1760.00);
-      else if (formSolution === 'Noronha') setFormBillingValue(1820.00);
-      else if (formSolution === 'Ativação PCM') setFormBillingValue(3500.00);
+      if (formSolution === 'Interior') setFormBillingValue(starlinkPrices.costInterior);
+      else if (formSolution === 'Noronha') setFormBillingValue(starlinkPrices.costNoronha);
+      else if (formSolution === 'Ativação PCM') setFormBillingValue(starlinkPrices.costNovoPCM);
     }
-  }, [formSolution, editingId]);
+  }, [formSolution, starlinkPrices, editingId]);
 
   // Toast Notification
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
@@ -286,9 +331,9 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
 
   // Pricing helper
   const getPricing = (sol: 'Interior' | 'Noronha' | 'Ativação PCM') => {
-    if (sol === 'Interior') return CONSTANTS.COST_INTERIOR;
-    if (sol === 'Noronha') return CONSTANTS.COST_NORONHA;
-    return CONSTANTS.COST_NOVO_PCM;
+    if (sol === 'Interior') return starlinkPrices.costInterior;
+    if (sol === 'Noronha') return starlinkPrices.costNoronha;
+    return starlinkPrices.costNovoPCM;
   };
 
   // Form Submission
@@ -328,6 +373,7 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
         referenceMonth: formReferenceMonth,
         date: formDate,
         protocol: formProtocol,
+        relatedOs: formRelatedOs,
         location: formLocation,
         description: formDescription,
         solution: formSolution,
@@ -355,6 +401,7 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
         referenceMonth: formReferenceMonth,
         date: formDate,
         protocol: formProtocol,
+        relatedOs: formRelatedOs,
         location: formLocation,
         description: formDescription,
         solution: formSolution,
@@ -378,19 +425,41 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
 
   const resetForm = () => {
     setFormProtocol('');
+    setFormRelatedOs('');
     setFormLocation('');
     setFormDescription('');
     setFormSolution('Interior');
     setFormReferenceMonth(referenceMonth);
-    setFormBillingValue(1760.00);
+    setFormBillingValue(starlinkPrices.costInterior);
     setShowForm(false);
     setEditingId(null);
+  };
+
+  const handleSaveConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    try {
+      await setDoc(doc(db, 'systemPrices', 'starlink'), {
+        costInterior: Number(configCostInterior),
+        costNoronha: Number(configCostNoronha),
+        costNovoPCM: Number(configCostNovoPCM),
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      showToast("Configurações da Starlink salvas com sucesso!", "success");
+      setShowConfig(false);
+    } catch (err) {
+      console.error("Erro ao salvar config Starlink:", err);
+      showToast("Falha ao salvar as configurações.", "error");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const startEdit = (os: StarlinkOS) => {
     setEditingId(os.id);
     setFormDate(os.date);
     setFormProtocol(os.protocol);
+    setFormRelatedOs(os.relatedOs || '');
     setFormLocation(os.location);
     setFormDescription(os.description);
     setFormSolution(os.solution);
@@ -443,9 +512,9 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
         [''],
         ['RESUMO DO PERÍODO'],
         ['Categoria', 'Quantidade', 'Valor Unitário', 'Valor Total'],
-        ['Starlink Interior', stats.countInterior, formatBRL(CONSTANTS.COST_INTERIOR), formatBRL(stats.costInterior)],
-        ['Starlink Noronha', stats.countNoronha, formatBRL(CONSTANTS.COST_NORONHA), formatBRL(stats.costNoronha)],
-        ['Novas Ativações PCM', stats.countPCM, formatBRL(CONSTANTS.COST_NOVO_PCM), formatBRL(stats.costPCM)],
+        ['Starlink Interior', stats.countInterior, formatBRL(starlinkPrices.costInterior), formatBRL(stats.costInterior)],
+        ['Starlink Noronha', stats.countNoronha, formatBRL(starlinkPrices.costNoronha), formatBRL(stats.costNoronha)],
+        ['Novas Ativações PCM', stats.countPCM, formatBRL(starlinkPrices.costNovoPCM), formatBRL(stats.costPCM)],
         ['FATURAMENTO TOTAL ACUMULADO', '', '', formatBRL(stats.grandTotal)]
       ];
 
@@ -457,13 +526,14 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
         const rows = activeRecords.map(r => ({
           'DATA': r.date ? new Date(r.date + 'T00:00:00').toLocaleDateString('pt-BR') : '',
           'PROTOCOLO': r.protocol,
+          'O.S RELACIONADA': r.relatedOs || '',
           'LOCAL': r.location,
           'DESCRIÇÃO DO SERVIÇO': r.description,
           'SOLUÇÃO': r.solution,
           'FATURAMENTO': formatBRL(r.billingValue)
         }));
         const wsDetail = XLSX.utils.json_to_sheet(rows);
-        wsDetail['!cols'] = [{ wch: 12 }, { wch: 15 }, { wch: 30 }, { wch: 45 }, { wch: 20 }, { wch: 15 }];
+        wsDetail['!cols'] = [{ wch: 12 }, { wch: 15 }, { wch: 20 }, { wch: 30 }, { wch: 45 }, { wch: 20 }, { wch: 15 }];
         XLSX.utils.book_append_sheet(wb, wsDetail, 'Ordem de Serviços Detalhado');
       }
 
@@ -556,12 +626,13 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
       doc.setFont("helvetica", "bold");
       doc.setFontSize(8);
       doc.setTextColor(75, 85, 99);
-      doc.text("Data", 17, y);
-      doc.text("Protocolo", 35, y);
-      doc.text("Local", 52, y);
+      doc.text("Data", 15, y);
+      doc.text("Protocolo", 28, y);
+      doc.text("OS Rel.", 43, y);
+      doc.text("Local", 58, y);
       doc.text("Solução", 95, y);
-      doc.text("Faturamento", 135, y);
-      doc.text("Descrição do Serviço", 163, y);
+      doc.text("Faturamento", 125, y);
+      doc.text("Descrição do Serviço", 150, y);
 
       doc.line(15, y + 2, 195, y + 2);
       y += 6;
@@ -571,7 +642,7 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
       doc.setTextColor(17, 24, 39);
 
       if (activeRecords.length === 0) {
-        doc.text("Nenhuma ordem de serviço cadastrada neste mês.", 17, y);
+        doc.text("Nenhuma ordem de serviço cadastrada neste mês.", 15, y);
       } else {
         activeRecords.forEach(r => {
           if (y > 270) {
@@ -581,30 +652,32 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
             doc.setFont("helvetica", "bold");
             doc.setFontSize(8);
             doc.setTextColor(75, 85, 99);
-            doc.text("Data", 17, y);
-            doc.text("Protocolo", 35, y);
-            doc.text("Local", 52, y);
+            doc.text("Data", 15, y);
+            doc.text("Protocolo", 28, y);
+            doc.text("OS Rel.", 43, y);
+            doc.text("Local", 58, y);
             doc.text("Soluço", 95, y);
-            doc.text("Faturamento", 135, y);
-            doc.text("Descrição do Serviço", 163, y);
+            doc.text("Faturamento", 125, y);
+            doc.text("Descrição do Serviço", 150, y);
             doc.line(15, y + 2, 195, y + 2);
             y += 6;
           }
 
           const localFormatted = r.location.length > 20 ? r.location.substring(0, 18) + '..' : r.location;
-          const descFormatted = r.description.length > 18 ? r.description.substring(0, 16) + '..' : r.description;
+          const descFormatted = r.description.length > 24 ? r.description.substring(0, 22) + '..' : r.description;
 
           doc.setFont("helvetica", "bold");
           const ptDate = r.date ? new Date(r.date + 'T00:00:00').toLocaleDateString('pt-BR') : '-';
-          doc.text(ptDate, 17, y);
-          doc.text(r.protocol, 35, y);
+          doc.text(ptDate, 15, y);
+          doc.text(r.protocol, 28, y);
+          doc.text(r.relatedOs || '-', 43, y);
           doc.setFont("helvetica", "normal");
-          doc.text(localFormatted, 52, y);
+          doc.text(localFormatted, 58, y);
           doc.text(r.solution, 95, y);
           doc.setFont("helvetica", "bold");
-          doc.text(formatBRL(r.billingValue), 135, y);
+          doc.text(formatBRL(r.billingValue), 125, y);
           doc.setFont("helvetica", "normal");
-          doc.text(descFormatted, 163, y);
+          doc.text(descFormatted, 150, y);
 
           y += 6.5;
         });
@@ -701,13 +774,23 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
 
             <div className="flex flex-row sm:flex-col gap-2 shrink-0">
               <button
+                type="button"
+                onClick={() => setShowConfig(!showConfig)}
+                className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all shadow-xs cursor-pointer active:scale-95 duration-150 border border-zinc-250 dark:border-zinc-700"
+              >
+                <Sliders className="h-4 w-4" />
+                <span>Ajustar Tarifas</span>
+              </button>
+              <button
+                type="button"
                 onClick={exportToExcel}
-                className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-605 hover:bg-emerald-700 bg-emerald-600 text-white rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all shadow-xs cursor-pointer active:scale-95 duration-150"
+                className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all shadow-xs cursor-pointer active:scale-95 duration-150"
               >
                 <FileSpreadsheet className="h-4 w-4 text-white" />
                 <span>Planilha Excel</span>
               </button>
               <button
+                type="button"
                 onClick={exportToPDF}
                 className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all shadow-xs cursor-pointer active:scale-95 duration-150"
               >
@@ -719,6 +802,79 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
         </div>
       </div>
 
+      {/* Dynamic Tariff Config Panel for Starlink */}
+      {showConfig && (
+        <form onSubmit={handleSaveConfig} className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-3.5xl border border-zinc-200 dark:border-zinc-800/80 space-y-6 animate-slide-in">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <Sliders className="h-5 w-5 text-cyan-600" />
+              <div>
+                <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-50 uppercase tracking-wider">Ajustar Tarifas & Parâmetros (Starlink)</h3>
+                <p className="text-xs text-zinc-400">Edite as tarifas de implantação da Starlink para o projeto PECONECTADO II</p>
+              </div>
+            </div>
+            <button 
+              type="button" 
+              onClick={() => setShowConfig(false)} 
+              className="p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-xl text-zinc-400 hover:text-zinc-655 transition-colors cursor-pointer"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div className="space-y-1">
+              <label className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Custo Starlink Interior (R$)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={configCostInterior}
+                onChange={(e) => setConfigCostInterior(Number(e.target.value))}
+                className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs font-bold text-zinc-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Custo Starlink Noronha (R$)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={configCostNoronha}
+                onChange={(e) => setConfigCostNoronha(Number(e.target.value))}
+                className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs font-bold text-zinc-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Custo Ativação PCM / Novo PCM (R$)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={configCostNovoPCM}
+                onChange={(e) => setConfigCostNovoPCM(Number(e.target.value))}
+                className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs font-bold text-zinc-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 justify-end pt-2 border-t border-zinc-200 dark:border-zinc-850">
+            <button
+              type="button"
+              onClick={() => setShowConfig(false)}
+              className="px-4 py-2 rounded-xl text-xs font-bold text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200/50 dark:hover:bg-zinc-900/50 transition-colors cursor-pointer"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="px-5 py-2 bg-cyan-600 text-white font-bold rounded-xl text-xs flex items-center gap-2 hover:opacity-90 active:scale-95 transition-all cursor-pointer shadow-xs"
+            >
+              <Sliders className="h-3.5 w-3.5" />
+              <span>{isLoading ? 'Salvando...' : 'Salvar Alterações'}</span>
+            </button>
+          </div>
+        </form>
+      )}
+
       {/* Statistics Cards - Very similar to Um Telecom dashboard */}
       <h2 className="text-xs font-black uppercase tracking-widest text-zinc-400 font-mono pl-1">
         Demonstrativo Starlink do Mês ({referenceMonth})
@@ -729,7 +885,7 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
         <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200/85 dark:border-zinc-800/85 p-5 space-y-3 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold text-cyan-600 dark:text-cyan-400 bg-cyan-500/10 dark:bg-cyan-500/20 px-2 py-0.5 rounded-md font-mono">
-              VALOR: R$ 1.760,00
+              VALOR: {formatBRL(starlinkPrices.costInterior)}
             </span>
             <Globe className="h-4 w-4 text-zinc-400" />
           </div>
@@ -748,7 +904,7 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
         <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200/85 dark:border-zinc-800/85 p-5 space-y-3 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold text-amber-600 dark:text-amber-450 bg-amber-500/10 dark:bg-amber-550/20 px-2 py-0.5 rounded-md font-mono">
-              VALOR: R$ 1.820,00
+              VALOR: {formatBRL(starlinkPrices.costNoronha)}
             </span>
             <TrendingUp className="h-4 w-4 text-zinc-400" />
           </div>
@@ -767,7 +923,7 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
         <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200/85 dark:border-zinc-800/85 p-5 space-y-3 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold text-purple-600 dark:text-purple-400 bg-purple-500/10 dark:bg-purple-500/20 px-2 py-0.5 rounded-md font-mono">
-              VALOR: R$ 3.500,00
+              VALOR: {formatBRL(starlinkPrices.costNovoPCM)}
             </span>
             <Wrench className="h-4 w-4 text-zinc-400" />
           </div>
@@ -840,7 +996,7 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
               {/* Field 1: DATA */}
               <div>
                 <label className="block text-[11px] font-black uppercase text-zinc-400 tracking-wider mb-1.5 font-mono">
@@ -873,6 +1029,20 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
                 />
               </div>
 
+              {/* Field 2.2: O.S Relacionada */}
+              <div>
+                <label className="block text-[11px] font-black uppercase text-zinc-400 tracking-wider mb-1.5 font-mono">
+                  O.S Relacionada
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: OS-1234"
+                  value={formRelatedOs}
+                  onChange={(e) => setFormRelatedOs(e.target.value)}
+                  className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                />
+              </div>
+
               {/* Field 3: LOCAL */}
               <div>
                 <label className="block text-[11px] font-black uppercase text-zinc-400 tracking-wider mb-1.5 font-mono">
@@ -901,9 +1071,9 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
                     onChange={(e) => setFormSolution(e.target.value as any)}
                     className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-cyan-500 appearance-none cursor-pointer pr-10"
                   >
-                    <option value="Interior">Starlink Interior (R$ 1.760,00)</option>
-                    <option value="Noronha">Starlink Noronha (R$ 1.820,00)</option>
-                    <option value="Ativação PCM">Ativação PCM (R$ 3.500,00)</option>
+                    <option value="Interior">Starlink Interior ({formatBRL(starlinkPrices.costInterior)})</option>
+                    <option value="Noronha">Starlink Noronha ({formatBRL(starlinkPrices.costNoronha)})</option>
+                    <option value="Ativação PCM">Ativação PCM ({formatBRL(starlinkPrices.costNovoPCM)})</option>
                   </select>
                   <ChevronDown className="absolute right-3.5 top-3 h-4 w-4 text-zinc-400 pointer-events-none" />
                 </div>
@@ -1002,6 +1172,7 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
               <tr className="border-b border-zinc-150 dark:border-zinc-800 text-[10px] font-bold uppercase font-mono text-zinc-400 tracking-wider">
                 <th className="py-3 px-2">DATA</th>
                 <th className="py-3 px-2">PROTOCOLO</th>
+                <th className="py-3 px-2">O.S Relacionada</th>
                 <th className="py-3 px-2">LOCAL</th>
                 <th className="py-3 px-2">DESCRIÇÃO DO SERVIÇO</th>
                 <th className="py-3 px-2">SOLUÇÃO</th>
@@ -1012,7 +1183,7 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
             <tbody className="divide-y divide-zinc-100/60 dark:divide-zinc-800/50">
               {activeRecords.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-8 text-center text-xs text-zinc-400 font-sans">
+                  <td colSpan={8} className="py-8 text-center text-xs text-zinc-400 font-sans">
                     Nenhuma ordem de serviço cadastrada para este mês de referência.
                   </td>
                 </tr>
@@ -1027,6 +1198,11 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
                     {/* PROTOCOLO */}
                     <td className="py-3.5 px-2 font-mono text-xs font-bold text-zinc-400">
                       {item.protocol}
+                    </td>
+
+                    {/* O.S Relacionada */}
+                    <td className="py-3.5 px-2 font-mono text-xs font-bold text-zinc-400">
+                      {item.relatedOs || '-'}
                     </td>
 
                     {/* LOCAL */}
@@ -1089,7 +1265,7 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
           <div className="space-y-1">
             <h4 className="text-xs font-bold text-zinc-900 dark:text-white">Regras de Faturamento Starlink - Um Telecom</h4>
             <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed font-sans">
-              Starlink no projeto PECONECTADO II são acompanhadas na tabela acima. O valor de implantação para o Interior de Pernambuco é fixado em R$ 1.760,00, no Arquipélago de Fernando de Noronha é fixado em R$ 1.820,00, e com abertura de nova ativação física PCM são calculados em R$ 3.500,00.
+              Starlink no projeto PECONECTADO II são acompanhadas na tabela acima. O valor de implantação para o Interior de Pernambuco é fixado em {formatBRL(starlinkPrices.costInterior)}, no Arquipélago de Fernando de Noronha é fixado em {formatBRL(starlinkPrices.costNoronha)}, e com abertura de nova ativação física PCM são calculados em {formatBRL(starlinkPrices.costNovoPCM)}.
             </p>
           </div>
         </div>

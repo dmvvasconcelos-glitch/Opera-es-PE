@@ -108,7 +108,8 @@ service cloud.firestore {
       && data.notes is string
       && data.notes.size() <= 2000
       && (!data.keys().hasAll(['solution']) || data.solution is string)
-      && (!data.keys().hasAll(['type']) || data.type == null || data.type is string);
+      && (!data.keys().hasAll(['type']) || data.type == null || data.type is string)
+      && (!data.keys().hasAll(['relatedOs']) || data.relatedOs == null || data.relatedOs is string);
     }
 
     function isValidPvfMonthlyContract(data) {
@@ -148,7 +149,8 @@ service cloud.firestore {
         'solution',
         'billingValue'
       ])
-      && data.keys().size() == 8
+      && (!data.keys().hasAll(['sdm']) || data.sdm == null || data.sdm is string)
+      && (!data.keys().hasAll(['relatedOs']) || data.relatedOs == null || data.relatedOs is string)
       && data.id is string
       && data.id.size() <= 128
       && data.referenceMonth is string
@@ -177,7 +179,7 @@ service cloud.firestore {
         'category',
         'solution'
       ])
-      && data.keys().size() == 8
+      && (data.keys().size() == 8 || (data.keys().size() == 9 && 'sdm' in data && (data.sdm == null || data.sdm is string)))
       && data.id is string
       && data.id.size() <= 128
       && data.referenceMonth is string
@@ -254,6 +256,18 @@ service cloud.firestore {
       && data.keys().size() == 6;
     }
 
+    function isValidUmTelecomPrices(data) {
+      return data.keys().hasAll([
+        'franchiseBaseCost',
+        'limitBasica',
+        'limitCritica',
+        'costExcedente',
+        'costManutencao',
+        'costAtivacao'
+      ])
+      && data.keys().size() == 6;
+    }
+
     function isValidOperationalActivity(data) {
       return data.keys().hasAll([
         'id',
@@ -315,7 +329,8 @@ service cloud.firestore {
       allow create, update: if isValidId(docId) && (
         (docId == 'current' && isValidPrices(incoming())) ||
         (docId == 'contactCenter' && isValidContactCenterPrices(incoming())) ||
-        (docId == 'vectra' && isValidVectraPrices(incoming()))
+        (docId == 'vectra' && isValidVectraPrices(incoming())) ||
+        (docId == 'umtelecom' && isValidUmTelecomPrices(incoming()))
       );
       allow delete: if isValidId(docId);
     }

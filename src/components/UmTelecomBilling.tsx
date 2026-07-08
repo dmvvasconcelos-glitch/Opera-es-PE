@@ -20,6 +20,7 @@ import {
   X,
   FileSpreadsheet,
   Search,
+  Sliders,
   ShieldAlert
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -35,6 +36,7 @@ interface UmTelecomRecord {
   category: 'eletrica' | 'manutencao_pcm' | 'ativacao_pcm';
   type: 'basica' | 'critica' | null;
   osNumber: string;
+  relatedOs?: string;
   date: string;
   location: string;
   notes: string;
@@ -150,6 +152,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
   const [formCategory, setFormCategory] = useState<'eletrica' | 'manutencao_pcm' | 'ativacao_pcm'>('eletrica');
   const [formEletricaType, setFormEletricaType] = useState<'basica' | 'critica'>('basica');
   const [formOsNumber, setFormOsNumber] = useState('');
+  const [formRelatedOs, setFormRelatedOs] = useState('');
   const [formDate, setFormDate] = useState(() => {
     const today = new Date();
     const y = today.getFullYear();
@@ -175,6 +178,95 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
   const showToast = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
+  };
+
+  const [umTelecomPrices, setUmTelecomPrices] = useState({
+    franchiseBaseCost: 19939.75,
+    limitBasica: 10,
+    limitCritica: 5,
+    costExcedente: 1499.35,
+    costManutencao: 1102.35,
+    costAtivacao: 2548.75
+  });
+
+  const [showConfig, setShowConfig] = useState(false);
+  const [configFranchiseBaseCost, setConfigFranchiseBaseCost] = useState(19939.75);
+  const [configLimitBasica, setConfigLimitBasica] = useState(10);
+  const [configLimitCritica, setConfigLimitCritica] = useState(5);
+  const [configCostExcedente, setConfigCostExcedente] = useState(1499.35);
+  const [configCostManutencao, setConfigCostManutencao] = useState(1102.35);
+  const [configCostAtivacao, setConfigCostAtivacao] = useState(2548.75);
+
+  useEffect(() => {
+    setConfigFranchiseBaseCost(umTelecomPrices.franchiseBaseCost);
+    setConfigLimitBasica(umTelecomPrices.limitBasica);
+    setConfigLimitCritica(umTelecomPrices.limitCritica);
+    setConfigCostExcedente(umTelecomPrices.costExcedente);
+    setConfigCostManutencao(umTelecomPrices.costManutencao);
+    setConfigCostAtivacao(umTelecomPrices.costAtivacao);
+  }, [umTelecomPrices]);
+
+  // Load pricing configuration from Firestore or initialize
+  useEffect(() => {
+    const pricesDocRef = doc(db, 'systemPrices', 'umtelecom');
+    
+    const unsubscribe = onSnapshot(pricesDocRef, async (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const pObj = {
+          franchiseBaseCost: Number(data.franchiseBaseCost ?? 19939.75),
+          limitBasica: Number(data.limitBasica ?? 10),
+          limitCritica: Number(data.limitCritica ?? 5),
+          costExcedente: Number(data.costExcedente ?? 1499.35),
+          costManutencao: Number(data.costManutencao ?? 1102.35),
+          costAtivacao: Number(data.costAtivacao ?? 2548.75)
+        };
+        setUmTelecomPrices(pObj);
+      } else {
+        if ((docSnap as any).metadata?.fromCache) {
+          return;
+        }
+        const defaultVals = {
+          franchiseBaseCost: 19939.75,
+          limitBasica: 10,
+          limitCritica: 5,
+          costExcedente: 1499.35,
+          costManutencao: 1102.35,
+          costAtivacao: 2548.75
+        };
+        try {
+          await setDoc(pricesDocRef, defaultVals);
+        } catch (e) {
+          console.error("Error setting default Um Telecom prices:", e);
+        }
+        setUmTelecomPrices(defaultVals);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const handleSaveConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    try {
+      const pricesDocRef = doc(db, 'systemPrices', 'umtelecom');
+      await setDoc(pricesDocRef, {
+        franchiseBaseCost: Number(configFranchiseBaseCost) || 0,
+        limitBasica: Number(configLimitBasica) || 0,
+        limitCritica: Number(configLimitCritica) || 0,
+        costExcedente: Number(configCostExcedente) || 0,
+        costManutencao: Number(configCostManutencao) || 0,
+        costAtivacao: Number(configCostAtivacao) || 0
+      });
+      showToast("Configurações do Contrato Um Telecom atualizadas!");
+      setShowConfig(false);
+    } catch (err) {
+      console.error("Error setting Um Telecom prices:", err);
+      showToast("Erro ao salvar configurações do contrato.", "error");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // Setup Firestore listener for umTelecomRecords with auto-seeding
@@ -364,18 +456,18 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
     const basicCount = basicEletricaRecords.length;
     const criticalCount = criticalEletricaRecords.length;
 
-    const excessBasica = Math.max(0, basicCount - CONSTANTS.LIMIT_BASICA);
-    const excessCritica = Math.max(0, criticalCount - CONSTANTS.LIMIT_CRITICA);
+    const excessBasica = Math.max(0, basicCount - umTelecomPrices.limitBasica);
+    const excessCritica = Math.max(0, criticalCount - umTelecomPrices.limitCritica);
     const totalExcess = excessBasica + excessCritica;
-    const valueExcess = totalExcess * CONSTANTS.COST_EXCEDENTE;
+    const valueExcess = totalExcess * umTelecomPrices.costExcedente;
 
     const maintenanceCount = maintenanceRecords.length;
-    const valueMaintenance = maintenanceCount * CONSTANTS.COST_MANUTENCAO;
+    const valueMaintenance = maintenanceCount * umTelecomPrices.costManutencao;
 
     const activationCount = activationRecords.length;
-    const valueActivations = activationCount * CONSTANTS.COST_ATIVACAO;
+    const valueActivations = activationCount * umTelecomPrices.costAtivacao;
 
-    const grandTotal = CONSTANTS.FRANCHISE_BASE_COST + valueExcess + valueMaintenance + valueActivations;
+    const grandTotal = umTelecomPrices.franchiseBaseCost + valueExcess + valueMaintenance + valueActivations;
 
     return {
       basicCount,
@@ -390,7 +482,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
       valueActivations,
       grandTotal
     };
-  }, [basicEletricaRecords, criticalEletricaRecords, maintenanceRecords, activationRecords, isZeroMonthSelected]);
+  }, [basicEletricaRecords, criticalEletricaRecords, maintenanceRecords, activationRecords, isZeroMonthSelected, umTelecomPrices]);
 
   // Format currency helper
   const formatBRL = (val: number) => {
@@ -410,17 +502,17 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
         [''],
         ['DEMONSTRATIVO FINANCEIRO CONSOLIDADO'],
         ['Item de Faturamento', 'Quantidade', 'Valor Unitário', 'Valor Total'],
-        ['Preço Fixo Mensal (Franquia Infra PCM)', '1', formatBRL(CONSTANTS.FRANCHISE_BASE_COST), formatBRL(CONSTANTS.FRANCHISE_BASE_COST)],
-        ['Excedentes O.S Elétrica Básica', calcResults.excessBasica, formatBRL(CONSTANTS.COST_EXCEDENTE), formatBRL(calcResults.excessBasica * CONSTANTS.COST_EXCEDENTE)],
-        ['Excedentes O.S Elétrica Crítica', calcResults.excessCritica, formatBRL(CONSTANTS.COST_EXCEDENTE), formatBRL(calcResults.excessCritica * CONSTANTS.COST_EXCEDENTE)],
-        ['Manutenções PCM sob Demanda', calcResults.maintenanceCount, formatBRL(CONSTANTS.COST_MANUTENCAO), formatBRL(calcResults.valueMaintenance)],
-        ['Novas Ativações de Canal PCM', calcResults.activationCount, formatBRL(CONSTANTS.COST_ATIVACAO), formatBRL(calcResults.valueActivations)],
+        ['Preço Fixo Mensal (Franquia Infra PCM)', '1', formatBRL(umTelecomPrices.franchiseBaseCost), formatBRL(umTelecomPrices.franchiseBaseCost)],
+        ['Excedentes O.S Elétrica Básica', calcResults.excessBasica, formatBRL(umTelecomPrices.costExcedente), formatBRL(calcResults.excessBasica * umTelecomPrices.costExcedente)],
+        ['Excedentes O.S Elétrica Crítica', calcResults.excessCritica, formatBRL(umTelecomPrices.costExcedente), formatBRL(calcResults.excessCritica * umTelecomPrices.costExcedente)],
+        ['Manutenções PCM sob Demanda', calcResults.maintenanceCount, formatBRL(umTelecomPrices.costManutencao), formatBRL(calcResults.valueMaintenance)],
+        ['Novas Ativações de Canal PCM', calcResults.activationCount, formatBRL(umTelecomPrices.costAtivacao), formatBRL(calcResults.valueActivations)],
         ['VALOR TOTAL A FATURAR', '', '', formatBRL(calcResults.grandTotal)],
         [''],
         ['INDICADORES E COBERTURA DE FRANQUIAS'],
         ['Categoria de Chamado', 'Volume Registrado', 'Limite da Franquia', 'Volume Excedente'],
-        ['O.S Elétrica Básica', calcResults.basicCount, `${CONSTANTS.LIMIT_BASICA} CH`, calcResults.excessBasica],
-        ['O.S Elétrica Crítica', calcResults.criticalCount, `${CONSTANTS.LIMIT_CRITICA} CH`, calcResults.excessCritica],
+        ['O.S Elétrica Básica', calcResults.basicCount, `${umTelecomPrices.limitBasica} CH`, calcResults.excessBasica],
+        ['O.S Elétrica Crítica', calcResults.criticalCount, `${umTelecomPrices.limitCritica} CH`, calcResults.excessCritica],
         ['Manutenções PCM', calcResults.maintenanceCount, 'Sem limite', 'Sob demanda'],
         ['Novas Ativações PCM', calcResults.activationCount, 'Sem limite', 'Sob demanda']
       ];
@@ -437,7 +529,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
         const eletricaRows = combinedEletrica.map((r) => {
           const isBasic = r.type === 'basica';
           const arr = isBasic ? basicEletricaRecords : criticalEletricaRecords;
-          const limit = isBasic ? CONSTANTS.LIMIT_BASICA : CONSTANTS.LIMIT_CRITICA;
+          const limit = isBasic ? umTelecomPrices.limitBasica : umTelecomPrices.limitCritica;
           const posIndex = arr.indexOf(r);
           const isExcess = posIndex >= limit;
           
@@ -448,7 +540,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
             'Tipo de O.S': isBasic ? 'Elétrica Básica' : 'Elétrica Crítica',
             'Descrição do Serviço': r.notes,
             'Solução Aplicada': r.solution || 'Problema elétrico resolvido.',
-            'Faturamento': isExcess ? 'Excedente (Tarifado R$ 1.499,35)' : 'Franquia (Incluso)'
+            'Faturamento': isExcess ? `Excedente (Tarifado ${formatBRL(umTelecomPrices.costExcedente)})` : 'Franquia (Incluso)'
           };
         });
         const wsEletrica = XLSX.utils.json_to_sheet(eletricaRows);
@@ -464,7 +556,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
           'Localização': r.location,
           'Detalhamento Técnico': r.notes,
           'Solução Aplicada': r.solution || 'Reparo concluído.',
-          'Valor Unitário': formatBRL(CONSTANTS.COST_MANUTENCAO),
+          'Valor Unitário': formatBRL(umTelecomPrices.costManutencao),
           'Faturamento': 'Tarifado sob Demanda'
         }));
         const wsMaintenance = XLSX.utils.json_to_sheet(maintenanceRows);
@@ -480,7 +572,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
           'Localização': r.location,
           'Detalhamento Técnico': r.notes,
           'Solução Aplicada': r.solution || 'Terminal PCM ativado com sucesso.',
-          'Valor Unitário': formatBRL(CONSTANTS.COST_ATIVACAO),
+          'Valor Unitário': formatBRL(umTelecomPrices.costAtivacao),
           'Faturamento': 'Nova Ativação Estrutural'
         }));
         const wsActivation = XLSX.utils.json_to_sheet(activationRows);
@@ -557,7 +649,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
       
       doc.text("1. Franquia de Infraestrutura Fixa Mensal (Preço Base):", 20, y + 18);
       doc.setFont("helvetica", "bold");
-      doc.text(formatBRL(CONSTANTS.FRANCHISE_BASE_COST), 150, y + 18);
+      doc.text(formatBRL(umTelecomPrices.franchiseBaseCost), 150, y + 18);
 
       doc.setFont("helvetica", "normal");
       doc.text(`2. Excedentes O.S Elétrica Básica e Crítica (${calcResults.totalExcess} CH):`, 20, y + 24);
@@ -610,7 +702,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
       doc.setTextColor(39, 39, 42);
       doc.text("O.S Elétrica Básica (CH Mínimos)", 18, y);
       doc.text(`${calcResults.basicCount} CH`, 90, y);
-      doc.text(`${CONSTANTS.LIMIT_BASICA} CH`, 130, y);
+      doc.text(`${umTelecomPrices.limitBasica} CH`, 130, y);
       
       if (calcResults.excessBasica > 0) {
         doc.setTextColor(225, 29, 72); // rose-600
@@ -625,7 +717,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
       doc.setFont("helvetica", "normal");
       doc.text("O.S Elétrica Crítica (CH Emergência)", 18, y);
       doc.text(`${calcResults.criticalCount} CH`, 90, y);
-      doc.text(`${CONSTANTS.LIMIT_CRITICA} CH`, 130, y);
+      doc.text(`${umTelecomPrices.limitCritica} CH`, 130, y);
       
       if (calcResults.excessCritica > 0) {
         doc.setTextColor(225, 29, 72); // rose-600
@@ -757,6 +849,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
       category: formCategory,
       type: formCategory === 'eletrica' ? formEletricaType : null,
       osNumber: formOsNumber,
+      relatedOs: formRelatedOs,
       date: formDate,
       location: formLocation,
       notes: formNotes || (formCategory === 'eletrica' 
@@ -783,6 +876,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
       
       // Reset form fields
       setFormOsNumber('');
+      setFormRelatedOs('');
       setFormLocation('');
       setFormNotes('');
       setFormSolution('');
@@ -804,6 +898,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
       setDbRecords(updatedRecords);
       
       setFormOsNumber('');
+      setFormRelatedOs('');
       setFormLocation('');
       setFormNotes('');
       setFormSolution('');
@@ -821,6 +916,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
     setFormCategory(record.category);
     setFormEletricaType(record.type || 'basica');
     setFormOsNumber(record.osNumber);
+    setFormRelatedOs(record.relatedOs || '');
     setFormDate(record.date);
     setFormLocation(record.location);
     setFormNotes(record.notes);
@@ -906,6 +1002,13 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
             {/* Export Buttons Group */}
             <div className="flex flex-row sm:flex-col gap-2 shrink-0">
               <button
+                onClick={() => setShowConfig(!showConfig)}
+                className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all shadow-xs cursor-pointer active:scale-95 duration-150 border border-zinc-250 dark:border-zinc-700"
+              >
+                <Sliders className="h-4 w-4" />
+                <span>Ajustar Tarifas</span>
+              </button>
+              <button
                 onClick={exportToExcel}
                 className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all shadow-xs cursor-pointer active:scale-95 duration-150"
                 id="btn-export-excel"
@@ -926,6 +1029,107 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
         </div>
       </div>
 
+      {/* Dynamic Tariff Config Panel */}
+      {showConfig && (
+        <form onSubmit={handleSaveConfig} className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-3.5xl border border-zinc-200 dark:border-zinc-800/80 space-y-6 animate-slide-in">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <Sliders className="h-5 w-5 text-umtelecom" />
+              <div>
+                <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-50 uppercase tracking-wider">Ajustar Tarifas & Parâmetros (Um Telecom)</h3>
+                <p className="text-xs text-zinc-400">Edite as franquias, limites de O.S. e custos de manutenção da Um Telecom</p>
+              </div>
+            </div>
+            <button 
+              type="button" 
+              onClick={() => setShowConfig(false)} 
+              className="p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-xl text-zinc-400 hover:text-zinc-600 transition-colors cursor-pointer"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div className="space-y-1">
+              <label className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Valor Fixo da Franquia (Base)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={configFranchiseBaseCost}
+                onChange={(e) => setConfigFranchiseBaseCost(Number(e.target.value))}
+                className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs font-bold text-zinc-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-umtelecom"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Limite Franquia Básica (CH)</label>
+              <input
+                type="number"
+                value={configLimitBasica}
+                onChange={(e) => setConfigLimitBasica(Number(e.target.value))}
+                className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs font-bold text-zinc-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-umtelecom"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Limite Franquia Crítica (CH)</label>
+              <input
+                type="number"
+                value={configLimitCritica}
+                onChange={(e) => setConfigLimitCritica(Number(e.target.value))}
+                className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs font-bold text-zinc-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-umtelecom"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Custo do Excedente (por CH)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={configCostExcedente}
+                onChange={(e) => setConfigCostExcedente(Number(e.target.value))}
+                className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs font-bold text-zinc-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-umtelecom"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Custo Manutenção PCM (Sob Demanda)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={configCostManutencao}
+                onChange={(e) => setConfigCostManutencao(Number(e.target.value))}
+                className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs font-bold text-zinc-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-umtelecom"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Custo Ativação PCM (Estrutural)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={configCostAtivacao}
+                onChange={(e) => setConfigCostAtivacao(Number(e.target.value))}
+                className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs font-bold text-zinc-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-umtelecom"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 justify-end pt-2 border-t border-zinc-200 dark:border-zinc-850">
+            <button
+              type="button"
+              onClick={() => setShowConfig(false)}
+              className="px-4 py-2 rounded-xl text-xs font-bold text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200/50 dark:hover:bg-zinc-900/50 transition-colors cursor-pointer"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="px-5 py-2 bg-umtelecom text-white font-bold rounded-xl text-xs flex items-center gap-2 hover:opacity-90 active:scale-95 transition-all cursor-pointer shadow-xs"
+            >
+              <Sliders className="h-3.5 w-3.5" />
+              <span>{isLoading ? 'Salvando...' : 'Salvar Alterações'}</span>
+            </button>
+          </div>
+        </form>
+      )}
+
       {/* Financial Overview Cards Grid */}
       <h2 className="text-xs font-black uppercase tracking-widest text-zinc-400 font-mono pl-1">
         Demonstrativo Consolidado do Mês ({referenceMonth})
@@ -943,10 +1147,10 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
           <div>
             <span className="block text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Franquia Infra PCM</span>
             <span className="block text-xl font-black text-zinc-900 dark:text-white mt-0.5">
-              {formatBRL(CONSTANTS.FRANCHISE_BASE_COST)}
+              {formatBRL(umTelecomPrices.franchiseBaseCost)}
             </span>
             <p className="text-[10.5px] text-zinc-400 mt-1 lines-clamp-2">
-              Franquia de 10 Básicas & 5 Críticas incluídas.
+              Franquia de {umTelecomPrices.limitBasica} Básicas & {umTelecomPrices.limitCritica} Críticas incluídas.
             </p>
           </div>
         </div>
@@ -955,7 +1159,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
         <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200/85 dark:border-zinc-800/85 p-5 space-y-3 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 dark:bg-amber-500/20 px-2 py-0.5 rounded-md font-mono">
-              R$ 1.499,35 / CH
+              {formatBRL(umTelecomPrices.costExcedente)} / CH
             </span>
             <TrendingUp className="h-4 w-4 text-zinc-400" />
           </div>
@@ -974,7 +1178,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
         <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200/85 dark:border-zinc-800/85 p-5 space-y-3 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold text-blue-600 dark:text-blue-450 bg-blue-500/10 dark:bg-blue-500/20 px-2 py-0.5 rounded-md font-mono">
-              R$ 1.102,35 / UN
+              {formatBRL(umTelecomPrices.costManutencao)} / UN
             </span>
             <Wrench className="h-4 w-4 text-zinc-400" />
           </div>
@@ -993,7 +1197,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
         <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200/85 dark:border-zinc-800/85 p-5 space-y-3 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold text-violet-600 dark:text-violet-400 bg-violet-500/10 dark:bg-violet-500/20 px-2 py-0.5 rounded-md font-mono">
-              R$ 2.548,75 / UN
+              {formatBRL(umTelecomPrices.costAtivacao)} / UN
             </span>
             <Activity className="h-4 w-4 text-zinc-400" />
           </div>
@@ -1035,11 +1239,11 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
         <div className="space-y-3.5 p-1">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="p-1 px-1.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-350 text-[10px] font-bold font-mono">LIMIT: 10</span>
+              <span className="p-1 px-1.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-350 text-[10px] font-bold font-mono">LIMIT: {umTelecomPrices.limitBasica}</span>
               <h3 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider">O.S Elétrica Básica</h3>
             </div>
             <span className="text-xs font-mono font-bold">
-              {calcResults.basicCount} / {CONSTANTS.LIMIT_BASICA}
+              {calcResults.basicCount} / {umTelecomPrices.limitBasica}
             </span>
           </div>
           
@@ -1047,14 +1251,14 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
           <div className="w-full bg-zinc-100 dark:bg-zinc-950 h-3.5 rounded-full overflow-hidden border border-zinc-200/40 dark:border-zinc-850/40 flex">
             {/* Filled green progress part */}
             <div 
-              className={`h-full transition-all duration-500 ${calcResults.basicCount > CONSTANTS.LIMIT_BASICA ? 'bg-amber-500' : 'bg-emerald-500'}`}
-              style={{ width: `${Math.min(100, (calcResults.basicCount / CONSTANTS.LIMIT_BASICA) * 100)}%` }}
+              className={`h-full transition-all duration-500 ${calcResults.basicCount > umTelecomPrices.limitBasica ? 'bg-amber-500' : 'bg-emerald-500'}`}
+              style={{ width: `${Math.min(100, (calcResults.basicCount / umTelecomPrices.limitBasica) * 100)}%` }}
             />
             {/* Excess red progress part if appropriate */}
-            {calcResults.basicCount > CONSTANTS.LIMIT_BASICA && (
+            {calcResults.basicCount > umTelecomPrices.limitBasica && (
               <div 
                 className="h-full bg-rose-500 animate-pulse transition-all duration-500"
-                style={{ width: `${Math.min(100, ((calcResults.basicCount - CONSTANTS.LIMIT_BASICA) / CONSTANTS.LIMIT_BASICA) * 100)}%` }}
+                style={{ width: `${Math.min(100, ((calcResults.basicCount - umTelecomPrices.limitBasica) / umTelecomPrices.limitBasica) * 100)}%` }}
               />
             )}
           </div>
@@ -1071,24 +1275,24 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
         <div className="space-y-3.5 p-1">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="p-1 px-1.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-350 text-[10px] font-bold font-mono">LIMIT: 5</span>
+              <span className="p-1 px-1.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-350 text-[10px] font-bold font-mono">LIMIT: {umTelecomPrices.limitCritica}</span>
               <h3 className="text-xs font-black text-zinc-900 dark:text-white uppercase tracking-wider">O.S Elétrica Crítica</h3>
             </div>
             <span className="text-xs font-mono font-bold">
-              {calcResults.criticalCount} / {CONSTANTS.LIMIT_CRITICA}
+              {calcResults.criticalCount} / {umTelecomPrices.limitCritica}
             </span>
           </div>
 
           {/* Custom progress bar */}
           <div className="w-full bg-zinc-100 dark:bg-zinc-950 h-3.5 rounded-full overflow-hidden border border-zinc-200/40 dark:border-zinc-850/40 flex">
             <div 
-              className={`h-full transition-all duration-500 ${calcResults.criticalCount > CONSTANTS.LIMIT_CRITICA ? 'bg-amber-500' : 'bg-emerald-500'}`}
-              style={{ width: `${Math.min(100, (calcResults.criticalCount / CONSTANTS.LIMIT_CRITICA) * 100)}%` }}
+              className={`h-full transition-all duration-500 ${calcResults.criticalCount > umTelecomPrices.limitCritica ? 'bg-amber-500' : 'bg-emerald-500'}`}
+              style={{ width: `${Math.min(100, (calcResults.criticalCount / umTelecomPrices.limitCritica) * 100)}%` }}
             />
-            {calcResults.criticalCount > CONSTANTS.LIMIT_CRITICA && (
+            {calcResults.criticalCount > umTelecomPrices.limitCritica && (
               <div 
                 className="h-full bg-rose-500 animate-pulse transition-all duration-500"
-                style={{ width: `${Math.min(100, ((calcResults.criticalCount - CONSTANTS.LIMIT_CRITICA) / CONSTANTS.LIMIT_CRITICA) * 100)}%` }}
+                style={{ width: `${Math.min(100, ((calcResults.criticalCount - umTelecomPrices.limitCritica) / umTelecomPrices.limitCritica) * 100)}%` }}
               />
             )}
           </div>
@@ -1279,7 +1483,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
             </h3>
             
             <form onSubmit={handleSaveRecord} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-5 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-6 gap-4">
                 
                 {/* Tipo de Chamado / Categoria */}
                 <div className="space-y-1.5">
@@ -1371,6 +1575,20 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                   />
                 </div>
 
+                {/* O.S Relacionada */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 font-mono">
+                    O.S Relacionada
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ex: OS-1234"
+                    value={formRelatedOs}
+                    onChange={(e) => setFormRelatedOs(e.target.value)}
+                    className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-800 dark:text-white placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-umtelecom"
+                  />
+                </div>
+
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
@@ -1421,6 +1639,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                       setEditingRecordId(null);
                       setFormLocation('');
                       setFormOsNumber('');
+                      setFormRelatedOs('');
                       setFormNotes('');
                       setFormSolution('');
                       setFormReferenceMonth(referenceMonth);
@@ -1519,6 +1738,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                       <tr className="bg-zinc-50 dark:bg-zinc-950 text-[10px] font-black uppercase tracking-wider text-zinc-400 font-mono border-b border-zinc-150 dark:border-zinc-800">
                         <th className="p-4">Data</th>
                         <th className="p-4">Protocolo</th>
+                        <th className="p-4">O.S Relacionada</th>
                         <th className="p-4">Classificação</th>
                         <th className="p-4">LOCAL</th>
                         <th className="p-4 w-[180px] max-w-[180px]">Descrição do Serviço</th>
@@ -1530,7 +1750,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                     <tbody className="divide-y divide-zinc-100 dark:divide-zinc-850 text-xs">
                       {/* 1. Basic Eletrica Rows */}
                       {filteredBasicEletricaRecords.map((record, index) => {
-                        const isExcess = index >= CONSTANTS.LIMIT_BASICA;
+                        const isExcess = index >= umTelecomPrices.limitBasica;
                         return (
                           <tr key={record.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-950/20 transition-all">
                             <td className="p-4 font-bold font-mono text-zinc-500 whitespace-nowrap">
@@ -1538,6 +1758,9 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                             </td>
                             <td className="p-4 font-bold text-zinc-900 dark:text-white font-mono whitespace-nowrap">
                               {record.osNumber}
+                            </td>
+                            <td className="p-4 font-bold text-zinc-900 dark:text-white font-mono whitespace-nowrap">
+                              {record.relatedOs || '-'}
                             </td>
                             <td className="p-4 whitespace-nowrap">
                               <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md font-bold uppercase text-[9px] bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-mono">
@@ -1560,13 +1783,13 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                                     EXCEDENTE #{index + 1}
                                   </span>
                                   <span className="text-rose-500 font-bold font-mono mt-1 block">
-                                    +{formatBRL(CONSTANTS.COST_EXCEDENTE)}
+                                    +{formatBRL(umTelecomPrices.costExcedente)}
                                   </span>
                                 </span>
                               ) : (
                                 <span className="inline-flex flex-col text-right">
                                   <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 font-mono uppercase bg-emerald-500/10 px-1.5 py-0.5 rounded-md">
-                                    FRANQUIA {index + 1}/10
+                                    FRANQUIA {index + 1}/{umTelecomPrices.limitBasica}
                                   </span>
                                   <span className="text-zinc-400 font-medium font-mono mt-1 block">
                                     R$ 0,00
@@ -1598,7 +1821,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
 
                       {/* 2. Critical Eletrica Rows */}
                       {filteredCriticalEletricaRecords.map((record, index) => {
-                        const isExcess = index >= CONSTANTS.LIMIT_CRITICA;
+                        const isExcess = index >= umTelecomPrices.limitCritica;
                         return (
                           <tr key={record.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-950/20 transition-all">
                             <td className="p-4 font-bold font-mono text-zinc-500 whitespace-nowrap">
@@ -1606,6 +1829,9 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                             </td>
                             <td className="p-4 font-bold text-zinc-900 dark:text-white font-mono whitespace-nowrap">
                               {record.osNumber}
+                            </td>
+                            <td className="p-4 font-bold text-zinc-900 dark:text-white font-mono whitespace-nowrap">
+                              {record.relatedOs || '-'}
                             </td>
                             <td className="p-4 whitespace-nowrap">
                               <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md font-bold uppercase text-[9px] bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 font-mono">
@@ -1628,13 +1854,13 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                                     EXCEDENTE #{index + 1}
                                   </span>
                                   <span className="text-rose-500 font-bold font-mono mt-1 block">
-                                    +{formatBRL(CONSTANTS.COST_EXCEDENTE)}
+                                    +{formatBRL(umTelecomPrices.costExcedente)}
                                   </span>
                                 </span>
                               ) : (
                                 <span className="inline-flex flex-col text-right">
                                   <span className="text-[9px] font-bold text-umtelecom dark:text-brand-light font-mono uppercase bg-umtelecom/10 px-1.5 py-0.5 rounded-md">
-                                    FRANQUIA {index + 1}/5
+                                    FRANQUIA {index + 1}/{umTelecomPrices.limitCritica}
                                   </span>
                                   <span className="text-zinc-400 font-medium font-mono mt-1 block">
                                     R$ 0,00
@@ -1706,6 +1932,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                       <tr className="bg-zinc-50 dark:bg-zinc-950 text-[10px] font-black uppercase tracking-wider text-zinc-400 font-mono border-b border-zinc-150 dark:border-zinc-800">
                         <th className="p-4">Data</th>
                         <th className="p-4">Protocolo</th>
+                        <th className="p-4">O.S Relacionada</th>
                         <th className="p-4">LOCAL</th>
                         <th className="p-4 w-[180px] max-w-[180px]">Detalhamento Técnico</th>
                         <th className="p-4 w-[180px] max-w-[180px]">Solução</th>
@@ -1721,6 +1948,9 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                           </td>
                           <td className="p-4 font-bold text-zinc-900 dark:text-white font-mono whitespace-nowrap">
                             {record.osNumber}
+                          </td>
+                          <td className="p-4 font-bold text-zinc-900 dark:text-white font-mono whitespace-nowrap">
+                            {record.relatedOs || '-'}
                           </td>
                           <td className="p-4 font-bold text-zinc-700 dark:text-zinc-300">
                             {record.location}
@@ -1797,6 +2027,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                       <tr className="bg-zinc-50 dark:bg-zinc-950 text-[10px] font-black uppercase tracking-wider text-zinc-400 font-mono border-b border-zinc-150 dark:border-zinc-800">
                         <th className="p-4">Data</th>
                         <th className="p-4">Protocolo</th>
+                        <th className="p-4">O.S Relacionada</th>
                         <th className="p-4">LOCAL</th>
                         <th className="p-4 w-[180px] max-w-[180px]">Detalhamento Técnico</th>
                         <th className="p-4 w-[180px] max-w-[180px]">Solução</th>
@@ -1812,6 +2043,9 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                           </td>
                           <td className="p-4 font-bold text-zinc-900 dark:text-white font-mono whitespace-nowrap">
                             {record.osNumber}
+                          </td>
+                          <td className="p-4 font-bold text-zinc-900 dark:text-white font-mono whitespace-nowrap">
+                            {record.relatedOs || '-'}
                           </td>
                           <td className="p-4 font-bold text-zinc-700 dark:text-zinc-300">
                             {record.location}
