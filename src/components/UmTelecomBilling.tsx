@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
-import { db, handleFirestoreError, OperationType, onSnapshot, getDoc, setDoc, deleteDoc, writeBatch } from '../firebase';
+import { db, handleFirestoreError, OperationType, cleanUndefined, onSnapshot, getDoc, setDoc, deleteDoc, writeBatch } from '../firebase';
 import { collection, doc } from 'firebase/firestore';
 import { UserSession } from '../types';
 import { useCurrentMonthFilter, getCurrentMonth, getAvailableMonths } from '../utils/monthUtils';
@@ -166,6 +166,33 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
   const [formReferenceMonth, setFormReferenceMonth] = useState(getCurrentMonth);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
   const [deleteRecordId, setDeleteRecordId] = useState<string | null>(null);
+  const [isSavingRecord, setIsSavingRecord] = useState(false);
+
+  // Derive real-time duplicate warning for protocol number validation
+  const duplicateWarning = useMemo(() => {
+    const cleanInput = formOsNumber.trim();
+    if (!cleanInput) return null;
+    const normalized = cleanInput.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const found = dbRecords.find(
+      (r) => r.id !== editingRecordId && (r.osNumber || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === normalized
+    );
+    if (found) {
+      return `Protocolo ${found.osNumber} já cadastrado no mês ${found.referenceMonth} (${found.location}).`;
+    }
+    return null;
+  }, [formOsNumber, dbRecords, editingRecordId]);
+
+  // Count protocol occurrences across all dbRecords for warning badges in tables
+  const protocolCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    dbRecords.forEach((r) => {
+      const key = (r.osNumber || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      if (key) {
+        counts[key] = (counts[key] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [dbRecords]);
   
   const isZeroMonthSelected = referenceMonth === 'Janeiro/2026' || referenceMonth === 'Fevereiro/2026';
   
@@ -822,11 +849,15 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
   const handleSaveRecord = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formOsNumber.trim()) {
+    if (isSavingRecord) return;
+
+    const cleanOsNumber = formOsNumber.trim();
+
+    if (!cleanOsNumber) {
       showToast("Número do Protocolo é obrigatório.", "error");
       return;
     }
-    if (formOsNumber.length !== 7) {
+    if (cleanOsNumber.length !== 7) {
       showToast("O Protocolo deve conter exatamente 7 dígitos numéricos.", "error");
       return;
     }
@@ -835,12 +866,25 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
       return;
     }
 
-    // Check for duplicate protocol/OS number (preventing duplicate OS in systems)
-    const isDuplicate = dbRecords.some(r => r.id !== editingRecordId && r.osNumber.trim() === formOsNumber.trim());
-    if (isDuplicate) {
-      showToast("Já existe um chamado cadastrado com este Protocolo técnico.", "error");
+    // Check for duplicate protocol/OS number (preventing duplicate OS in system regardless of month or category)
+    const normalizedNew = cleanOsNumber.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const duplicateRecord = dbRecords.find(
+      r => r.id !== editingRecordId && (r.osNumber || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === normalizedNew
+    );
+    if (duplicateRecord) {
+      showToast(
+        `Impossível cadastrar: Protocolo ${cleanOsNumber} já existe no sistema (${duplicateRecord.referenceMonth} - Local: ${duplicateRecord.location}).`,
+        "error"
+      );
       return;
     }
+
+    setIsSavingRecord(true);
+
+    const cleanRelatedOs = formRelatedOs.trim();
+    const cleanLocation = formLocation.trim();
+    const cleanNotes = formNotes.trim();
+    const cleanSolution = formSolution.trim();
 
     const uniqueId = editingRecordId || `um-telecom-${Date.now()}`;
     const newRecord: UmTelecomRecord = {
@@ -848,16 +892,16 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
       referenceMonth: formReferenceMonth,
       category: formCategory,
       type: formCategory === 'eletrica' ? formEletricaType : null,
-      osNumber: formOsNumber,
-      relatedOs: formRelatedOs,
+      osNumber: cleanOsNumber,
+      relatedOs: cleanRelatedOs || '',
       date: formDate,
-      location: formLocation,
-      notes: formNotes || (formCategory === 'eletrica' 
+      location: cleanLocation,
+      notes: cleanNotes || (formCategory === 'eletrica' 
         ? (formEletricaType === 'basica' ? 'Instalação ou substituição de estabilizador' : 'Instalação ou substituição de nobreak')
         : formCategory === 'manutencao_pcm' 
           ? 'Manutenção no PCM sob demanda' 
           : 'Nova ativação de PCM'),
-      solution: formSolution || (formCategory === 'eletrica'
+      solution: cleanSolution || (formCategory === 'eletrica'
         ? 'Problema elétrico resolvido.'
         : formCategory === 'manutencao_pcm'
           ? 'Reparo concluído.'
@@ -865,8 +909,14 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
     };
 
     try {
-      // 1. Save to Firestore
-      await setDoc(doc(db, 'umTelecomRecords', uniqueId), newRecord);
+      // 1. Save to Firestore with cleanUndefined
+      await setDoc(doc(db, 'umTelecomRecords', uniqueId), cleanUndefined(newRecord));
+
+      // Synchronize tab and month filters so the user sees the new OS immediately in the table
+      setActiveSubTab(formCategory);
+      if (formReferenceMonth && formReferenceMonth !== referenceMonth) {
+        setReferenceMonth(formReferenceMonth);
+      }
 
       if (editingRecordId) {
         showToast("Chamado atualizado com sucesso!", "success");
@@ -880,7 +930,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
       setFormLocation('');
       setFormNotes('');
       setFormSolution('');
-      setFormReferenceMonth(referenceMonth);
+      setFormReferenceMonth(formReferenceMonth || referenceMonth);
       setEditingRecordId(null);
       setShowAddForm(false);
     } catch (err) {
@@ -896,18 +946,25 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
       }
 
       setDbRecords(updatedRecords);
+
+      setActiveSubTab(formCategory);
+      if (formReferenceMonth && formReferenceMonth !== referenceMonth) {
+        setReferenceMonth(formReferenceMonth);
+      }
       
       setFormOsNumber('');
       setFormRelatedOs('');
       setFormLocation('');
       setFormNotes('');
       setFormSolution('');
-      setFormReferenceMonth(referenceMonth);
+      setFormReferenceMonth(formReferenceMonth || referenceMonth);
       setEditingRecordId(null);
       setShowAddForm(false);
 
       // Mandatory Firestore Security/Permission Error handler
       handleFirestoreError(err, OperationType.WRITE, `umTelecomRecords/${uniqueId}`);
+    } finally {
+      setIsSavingRecord(false);
     }
   };
 
@@ -1558,8 +1615,11 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
 
                 {/* OS Protocol Number */}
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 font-mono">
-                    Protocolo
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 font-mono flex items-center justify-between">
+                    <span>Protocolo</span>
+                    {duplicateWarning && (
+                      <span className="text-rose-500 font-bold text-[9px] uppercase tracking-normal">⚠️ Duplicado</span>
+                    )}
                   </label>
                   <input
                     type="text"
@@ -1571,8 +1631,18 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                     }}
                     required
                     maxLength={7}
-                    className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-800 dark:text-white placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-umtelecom"
+                    className={`w-full bg-white dark:bg-zinc-900 border rounded-xl px-3 py-2 text-xs font-bold text-zinc-800 dark:text-white placeholder-zinc-400 focus:outline-none focus:ring-1 ${
+                      duplicateWarning
+                        ? 'border-rose-500 text-rose-600 focus:ring-rose-500 bg-rose-50/20 dark:bg-rose-950/20'
+                        : 'border-zinc-250 dark:border-zinc-800 focus:ring-umtelecom'
+                    }`}
                   />
+                  {duplicateWarning && (
+                    <p className="text-[10px] font-bold text-rose-500 mt-1 flex items-start gap-1 leading-tight">
+                      <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
+                      <span>{duplicateWarning}</span>
+                    </p>
+                  )}
                 </div>
 
                 {/* O.S Relacionada */}
@@ -1650,9 +1720,12 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 bg-umtelecom hover:bg-umtelecom-hover text-white rounded-xl text-xs font-black cursor-pointer shadow-sm whitespace-nowrap transition-all font-sans"
+                    disabled={!!duplicateWarning || isSavingRecord}
+                    className={`px-5 py-2 bg-umtelecom hover:bg-umtelecom-hover text-white rounded-xl text-xs font-black shadow-sm whitespace-nowrap transition-all font-sans ${
+                      duplicateWarning || isSavingRecord ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer active:scale-95'
+                    }`}
                   >
-                    {editingRecordId ? 'ATUALIZAR' : 'SALVAR'}
+                    {isSavingRecord ? 'SALVANDO...' : editingRecordId ? 'ATUALIZAR' : 'SALVAR'}
                   </button>
                 </div>
 
@@ -1757,7 +1830,15 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                               {new Date(record.date).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}
                             </td>
                             <td className="p-4 font-bold text-zinc-900 dark:text-white font-mono whitespace-nowrap">
-                              {record.osNumber}
+                              <div className="flex items-center gap-1.5">
+                                <span>{record.osNumber}</span>
+                                {protocolCounts[(record.osNumber || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase()] > 1 && (
+                                  <span className="inline-flex items-center gap-1 text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded-md font-mono" title="Este protocolo aparece mais de uma vez no sistema!">
+                                    <AlertTriangle className="h-3 w-3 text-rose-500 shrink-0" />
+                                    <span>DUPLICADO</span>
+                                  </span>
+                                )}
+                              </div>
                             </td>
                             <td className="p-4 font-bold text-zinc-900 dark:text-white font-mono whitespace-nowrap">
                               {record.relatedOs || '-'}
@@ -1828,7 +1909,15 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                               {new Date(record.date).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}
                             </td>
                             <td className="p-4 font-bold text-zinc-900 dark:text-white font-mono whitespace-nowrap">
-                              {record.osNumber}
+                              <div className="flex items-center gap-1.5">
+                                <span>{record.osNumber}</span>
+                                {protocolCounts[(record.osNumber || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase()] > 1 && (
+                                  <span className="inline-flex items-center gap-1 text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded-md font-mono" title="Este protocolo aparece mais de uma vez no sistema!">
+                                    <AlertTriangle className="h-3 w-3 text-rose-500 shrink-0" />
+                                    <span>DUPLICADO</span>
+                                  </span>
+                                )}
+                              </div>
                             </td>
                             <td className="p-4 font-bold text-zinc-900 dark:text-white font-mono whitespace-nowrap">
                               {record.relatedOs || '-'}
@@ -1947,7 +2036,15 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                             {new Date(record.date).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}
                           </td>
                           <td className="p-4 font-bold text-zinc-900 dark:text-white font-mono whitespace-nowrap">
-                            {record.osNumber}
+                            <div className="flex items-center gap-1.5">
+                              <span>{record.osNumber}</span>
+                              {protocolCounts[(record.osNumber || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase()] > 1 && (
+                                <span className="inline-flex items-center gap-1 text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded-md font-mono" title="Este protocolo aparece mais de uma vez no sistema!">
+                                  <AlertTriangle className="h-3 w-3 text-rose-500 shrink-0" />
+                                  <span>DUPLICADO</span>
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="p-4 font-bold text-zinc-900 dark:text-white font-mono whitespace-nowrap">
                             {record.relatedOs || '-'}
@@ -2042,7 +2139,15 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                             {new Date(record.date).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}
                           </td>
                           <td className="p-4 font-bold text-zinc-900 dark:text-white font-mono whitespace-nowrap">
-                            {record.osNumber}
+                            <div className="flex items-center gap-1.5">
+                              <span>{record.osNumber}</span>
+                              {protocolCounts[(record.osNumber || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase()] > 1 && (
+                                <span className="inline-flex items-center gap-1 text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded-md font-mono" title="Este protocolo aparece mais de uma vez no sistema!">
+                                  <AlertTriangle className="h-3 w-3 text-rose-500 shrink-0" />
+                                  <span>DUPLICADO</span>
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="p-4 font-bold text-zinc-900 dark:text-white font-mono whitespace-nowrap">
                             {record.relatedOs || '-'}

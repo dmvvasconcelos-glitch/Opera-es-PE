@@ -50,14 +50,19 @@ import {
   Shield,
   Activity,
   Headset,
-  AlertCircle
+  AlertCircle,
+  BarChart2,
+  Maximize2,
+  X,
+  ArrowRight
 } from 'lucide-react';
-import { useCurrentMonthFilter, getAvailableMonths, isUnseededMonth } from '../utils/monthUtils';
+import { useCurrentMonthFilter, getAvailableMonths, isUnseededMonth, getPreviousMonth } from '../utils/monthUtils';
 
 interface DashboardProps {
   contracts: Contract[];
   prices: PvfPrices;
   user?: UserSession | null;
+  onSelectTab?: (tab: string) => void;
 }
 
 const UM_PRESEEDED_MOCK = [
@@ -296,7 +301,58 @@ const PRESEEDED_CONTACT_CENTER: ContactCenterOS[] = [
   }
 ];
 
-export default function Dashboard({ contracts, prices, user }: DashboardProps) {
+const CustomMiniTooltip = ({ active, payload, providerColor }: any) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="bg-zinc-900 text-white p-2 rounded-xl text-xs shadow-xl border border-zinc-800 font-mono">
+        <div className="font-bold text-[10px] text-zinc-400">{data.month}</div>
+        <div className="text-xs font-extrabold" style={{ color: providerColor || '#22c55e' }}>
+          {data.formatted}
+        </div>
+      </div>
+    );
+  }
+  return null;
+};
+
+const Custom12MTooltip = ({ active, payload, providerColor }: any) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="bg-zinc-900 text-white p-3 rounded-2xl text-xs shadow-2xl border border-zinc-700 font-mono space-y-1 select-none min-w-[190px]">
+        <div className="font-bold text-xs text-zinc-300 border-b border-zinc-800 pb-1">{data.month}</div>
+        <div className="text-base font-extrabold" style={{ color: providerColor || '#38bdf8' }}>
+          {data.formatted}
+        </div>
+        {data.pvfVal !== undefined && data.otherVal !== undefined ? (
+          <div className="text-[10.5px] space-y-0.5 pt-1 border-t border-zinc-800 text-zinc-300">
+            <div className="flex justify-between gap-3">
+              <span className="text-zinc-400">Faturamento PVF:</span>
+              <span className="font-bold text-indigo-400">{formatCurrency(data.pvfVal)}</span>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="text-zinc-400">Demais Serviços:</span>
+              <span className="font-bold text-amber-400">{formatCurrency(data.otherVal)}</span>
+            </div>
+          </div>
+        ) : data.pvfCount !== undefined ? (
+          <div className="text-[10.5px] flex justify-between gap-3 text-zinc-300 pt-0.5">
+            <span className="text-zinc-400">Total de PVFs:</span>
+            <span className="font-bold text-indigo-400">{data.pvfCount} un</span>
+          </div>
+        ) : (
+          <div className="text-[10px] text-zinc-400">
+            Faturamento apurado no período
+          </div>
+        )}
+      </div>
+    );
+  }
+  return null;
+};
+
+export default function Dashboard({ contracts, prices, user, onSelectTab }: DashboardProps) {
   // Reference Month state for consolidated calculations
   const [referenceMonth, setReferenceMonth] = useCurrentMonthFilter();
   const [dbUmRecords, setDbUmRecords] = useState<any[]>(() => {
@@ -386,6 +442,128 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
       costNovoPcm: 3500.00
     };
   });
+
+  // Format short month name for charts e.g. "Junho/2026" -> "Jun/26"
+  const formatShortMonth = (refMonth: string) => {
+    const parts = refMonth.split('/');
+    if (parts.length < 2) return refMonth;
+    const name = parts[0].trim();
+    const year = parts[1].trim().slice(-2);
+    const shortName = name.slice(0, 3);
+    return `${shortName}/${year}`;
+  };
+
+  // Helper to compute provider billing for any given reference month
+  const computeProviderBillingForMonth = (
+    provider: 'um-telecom' | 'starlink' | 'vectra',
+    refMonth: string
+  ): number => {
+    if (refMonth.includes('2025') || refMonth === 'Janeiro/2026' || refMonth === 'Fevereiro/2026') return 0;
+
+    if (provider === 'um-telecom') {
+      try {
+        const activeRecords = dbUmRecords.filter((r: any) => r.referenceMonth === refMonth);
+        const basicCount = activeRecords.filter((r: any) => r.category === 'eletrica' && r.type === 'basica').length;
+        const criticalCount = activeRecords.filter((r: any) => r.category === 'eletrica' && r.type === 'critica').length;
+        const maintenanceCount = activeRecords.filter((r: any) => r.category === 'manutencao_pcm').length;
+        const activationCount = activeRecords.filter((r: any) => r.category === 'ativacao_pcm').length;
+
+        const limitBas = Number(umTelecomPrices.limitBasica ?? 10);
+        const limitCrit = Number(umTelecomPrices.limitCritica ?? 5);
+        const costExc = Number(umTelecomPrices.costExcedente ?? 1499.35);
+        const costManut = Number(umTelecomPrices.costManutencao ?? 1102.35);
+        const costAtiv = Number(umTelecomPrices.costAtivacao ?? 2548.75);
+        const baseFranchise = Number(umTelecomPrices.franchiseBaseCost ?? 19939.75);
+
+        const excessBasica = Math.max(0, basicCount - limitBas);
+        const excessCritica = Math.max(0, criticalCount - limitCrit);
+        const valueExcess = (excessBasica + excessCritica) * costExc;
+        const valueMaintenance = maintenanceCount * costManut;
+        const valueActivations = activationCount * costAtiv;
+
+        return baseFranchise + valueExcess + valueMaintenance + valueActivations;
+      } catch {
+        return 19939.75;
+      }
+    }
+
+    if (provider === 'starlink') {
+      try {
+        const isStarlinkSeeded = typeof window !== 'undefined' && localStorage.getItem('starlink_seeded_v1') === 'true';
+        const records = (dbStarlinkRecords.length > 0 || isStarlinkSeeded) ? dbStarlinkRecords : STARLINK_PRESEEDED_MOCK;
+        const activeRecords = records.filter((r: any) => r.referenceMonth === refMonth);
+        
+        let costInterior = 0;
+        let costNoronha = 0;
+        let costPCM = 0;
+        const prInterior = Number(starlinkPrices.costInterior ?? 1760.00);
+        const prNoronha = Number(starlinkPrices.costNoronha ?? 1820.00);
+        const prPCM = Number(starlinkPrices.costNovoPcm ?? 3500.00);
+
+        activeRecords.forEach((r: any) => {
+          const sol = r.solution === 'Novo PCM (Ativação)' ? 'Ativação PCM' : r.solution;
+          if (sol === 'Interior') {
+            costInterior += prInterior;
+          } else if (sol === 'Noronha') {
+            costNoronha += prNoronha;
+          } else if (sol === 'Ativação PCM') {
+            costPCM += prPCM;
+          }
+        });
+        return costInterior + costNoronha + costPCM;
+      } catch {
+        return 0;
+      }
+    }
+
+    if (provider === 'vectra') {
+      try {
+        const isVectraSeeded = typeof window !== 'undefined' && localStorage.getItem('vectra_seeded_v1') === 'true';
+        const records = (dbVectraRecords.length > 0 || isVectraSeeded) ? dbVectraRecords : generateMockVectraRecords();
+        const monthRecords = records.filter((r: any) => r.referenceMonth === refMonth);
+        const totalCount = monthRecords.length > 0 ? monthRecords.length : 80;
+
+        const limitCombined = Number(vectraPrices.limitWifi ?? 60);
+        const baseCostCombined = Number(vectraPrices.baseCostWifi ?? 39400.20);
+        const excedenteCombined = Number(vectraPrices.excedenteWifi ?? 590.00);
+
+        const excessWifi = Math.max(0, totalCount - limitCombined);
+        return baseCostCombined + excessWifi * excedenteCombined;
+      } catch {
+        return 39400.20;
+      }
+    }
+
+    return 0;
+  };
+
+  const getProviderHistory = (provider: 'um-telecom' | 'starlink' | 'vectra', monthCount: number) => {
+    const list: string[] = [];
+    let curr = referenceMonth;
+    for (let i = 0; i < monthCount; i++) {
+      list.unshift(curr);
+      curr = getPreviousMonth(curr);
+    }
+
+    return list.map(m => {
+      const value = computeProviderBillingForMonth(provider, m);
+      const shortName = formatShortMonth(m);
+      const kVal = value > 0 ? (value >= 1000 ? `R$ ${(value / 1000).toFixed(1)}k` : formatCurrency(value)) : '';
+      return {
+        month: m,
+        shortName,
+        value,
+        formatted: formatCurrency(value),
+        kVal
+      };
+    });
+  };
+
+  const um3mHistory = useMemo(() => getProviderHistory('um-telecom', 3), [referenceMonth, dbUmRecords, umTelecomPrices]);
+  const starlink3mHistory = useMemo(() => getProviderHistory('starlink', 3), [referenceMonth, dbStarlinkRecords, starlinkPrices]);
+  const vectra3mHistory = useMemo(() => getProviderHistory('vectra', 3), [referenceMonth, dbVectraRecords, vectraPrices]);
+
+  const [modalProvider, setModalProvider] = useState<'um-telecom' | 'starlink' | 'vectra' | 'pvf-monthly' | 'general-monthly' | null>(null);
 
   const [dbActivities, setDbActivities] = useState<any[]>(() => {
     try {
@@ -1274,16 +1452,14 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
     return totalTableBilling + umTelecomStats.grandTotal + starlinkStats.grandTotal + vectraStats.grandTotal + totalCcBilling;
   }, [totalTableBilling, umTelecomStats, starlinkStats, vectraStats, totalCcBilling]);
 
-  // Faturamento total mês a mês, combinando histórico salvo e mês atual
+  // Faturamento total mês a mês, combinando histórico e os últimos 3 meses
   const monthlyBillingData = useMemo(() => {
     const MONTH_MAP: Record<string, number> = {
-      'janeiro': 0, 'fevereiro': 1, 'março': 2, 'abril': 3, 'maio': 4, 'junho': 5,
-      'julho': 6, 'agosto': 7, 'setembro': 8, 'outubro': 9, 'novembro': 10, 'dezembro': 11
+      'janeiro': 0, 'fevereiro': 1, 'março': 2, 'marco': 2, 'abril': 3, 'maio': 4, 'junho': 5,
+      'julho': 6, 'agosto': 7, 'setembro': 8, 'outubro': 9, 'novembro': 10, 'dezembro': 11,
+      '01': 0, '02': 1, '03': 2, '04': 3, '05': 4, '06': 5, '07': 6, '08': 7, '09': 8, '10': 9, '11': 10, '12': 11,
+      '1': 0, '2': 1, '3': 2, '4': 3, '5': 4, '6': 5, '7': 6, '8': 7, '9': 8
     };
-    const MONTH_LABELS = [
-      'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
-    ];
 
     function parseReferenceMonth(ref: string) {
       const parts = ref.split('/');
@@ -1293,7 +1469,7 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
         const monthIdx = MONTH_MAP[monthPart] !== undefined ? MONTH_MAP[monthPart] : 0;
         return { year: yearPart, month: monthIdx, score: yearPart * 12 + monthIdx };
       }
-      return { year: 2026, month: 5, score: 2026 * 12 + 5 };
+      return { year: 2026, month: 6, score: 2026 * 12 + 6 };
     }
 
     const getOtherServicesBillingForMonth = (refMonth: string) => {
@@ -1311,14 +1487,21 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
         const maintenanceCount = activeRecords.filter(r => r.category === 'manutencao_pcm').length;
         const activationCount = activeRecords.filter(r => r.category === 'ativacao_pcm').length;
         
-        const excessBasica = Math.max(0, basicCount - 10);
-        const excessCritica = Math.max(0, criticalCount - 5);
-        const valueExcess = (excessBasica + excessCritica) * 1499.35;
-        const valueMaintenance = maintenanceCount * 1102.35;
-        const valueActivations = activationCount * 2548.75;
+        const limitBas = Number(umTelecomPrices.limitBasica ?? 10);
+        const limitCrit = Number(umTelecomPrices.limitCritica ?? 5);
+        const costExc = Number(umTelecomPrices.costExcedente ?? 1499.35);
+        const costManut = Number(umTelecomPrices.costManutencao ?? 1102.35);
+        const costAtiv = Number(umTelecomPrices.costAtivacao ?? 2548.75);
+        const baseFranchise = Number(umTelecomPrices.franchiseBaseCost ?? 19939.75);
+
+        const excessBasica = Math.max(0, basicCount - limitBas);
+        const excessCritica = Math.max(0, criticalCount - limitCrit);
+        const valueExcess = (excessBasica + excessCritica) * costExc;
+        const valueMaintenance = maintenanceCount * costManut;
+        const valueActivations = activationCount * costAtiv;
         
-        umTotal = 19939.75 + valueExcess + valueMaintenance + valueActivations;
-      } catch (e) {
+        umTotal = baseFranchise + valueExcess + valueMaintenance + valueActivations;
+      } catch {
         umTotal = 19939.75;
       }
 
@@ -1331,14 +1514,18 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
         let costInterior = 0;
         let costNoronha = 0;
         let costPCM = 0;
+        const prInterior = Number(starlinkPrices.costInterior ?? 1760.00);
+        const prNoronha = Number(starlinkPrices.costNoronha ?? 1820.00);
+        const prPCM = Number(starlinkPrices.costNovoPcm ?? 3500.00);
+
         activeRecords.forEach((r: any) => {
           const sol = r.solution === 'Novo PCM (Ativação)' ? 'Ativação PCM' : r.solution;
           if (sol === 'Interior') {
-            costInterior += Number(r.billingValue || 1760.00);
+            costInterior += prInterior;
           } else if (sol === 'Noronha') {
-            costNoronha += Number(r.billingValue || 1820.00);
+            costNoronha += prNoronha;
           } else if (sol === 'Ativação PCM') {
-            costPCM += Number(r.billingValue || 3500.00);
+            costPCM += prPCM;
           }
         });
         starlinkTotal = costInterior + costNoronha + costPCM;
@@ -1386,148 +1573,201 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
       return umTotal + starlinkTotal + vectraTotal + ccTotal;
     };
 
-    const compiledMonthsMap = new Map<string, { name: string; 'Faturamento (R$)': number; 'Faturamento Geral (R$)': number; 'Total PVFs': number; 'Active Contracts': number; score: number }>();
+    const getBillingDataForMonth = (m: string) => {
+      if (m.includes('2025') || m === 'Janeiro/2026' || m === 'Fevereiro/2026') {
+        return {
+          name: m,
+          shortName: formatShortMonth(m),
+          'Faturamento (R$)': 0,
+          'Faturamento Geral (R$)': 0,
+          'Total PVFs': 0,
+          'Active Contracts': 0,
+          score: parseReferenceMonth(m).score
+        };
+      }
 
-    // 1. Add snapshots fetched from the database
-    savedSnapshots.forEach(snap => {
-      if (!snap.referenceMonth) return;
-      const parsed = parseReferenceMonth(snap.referenceMonth);
+      // 1. PVF Billing & Points
+      let pvfBilling = 0;
+      let pvfPoints = 0;
+      let activeContractsCount = 0;
 
-      let snapBilling = snap.totalBilling;
-      let snapPvfCount = snap.totalPvfCount;
-      let snapActiveContracts = 0;
+      const snap = savedSnapshots.find(s => s.referenceMonth === m);
 
-      if (user && user.role === 'cliente') {
-        const allowed = user.secretarias || [];
-        const filteredContracts = (snap.contracts || []).filter(c => allowed.includes(c.secretaria));
-        snapBilling = filteredContracts.reduce((acc, c) => {
-          const s = (c.status || '').trim().toLowerCase();
-          if (s === 'ativo' || s === 'ativa') {
-            return acc + getContractValue(c, snap.prices || prices);
-          }
-          return acc;
-        }, 0);
-        snapPvfCount = filteredContracts.reduce((acc, c) => {
-          const s = (c.status || '').trim().toLowerCase();
-          if (s === 'ativo' || s === 'ativa') {
-            return acc + getContractPvfTotal(c);
-          }
-          return acc;
-        }, 0);
-        snapActiveContracts = filteredContracts.filter(c => {
-          const s = (c.status || '').trim().toLowerCase();
-          return s === 'ativo' || s === 'ativa';
-        }).length;
-      } else {
+      if (snap) {
+        pvfBilling = snap.totalBilling;
+        pvfPoints = snap.totalPvfCount;
         if (snap.contracts) {
-          snapActiveContracts = snap.contracts.filter(c => {
+          activeContractsCount = snap.contracts.filter(c => {
             const s = (c.status || '').trim().toLowerCase();
             return s === 'ativo' || s === 'ativa';
           }).length;
         }
-      }
 
-      const snapOtherTotal = getOtherServicesBillingForMonth(snap.referenceMonth);
-
-      compiledMonthsMap.set(snap.referenceMonth, {
-        name: snap.referenceMonth,
-        'Faturamento (R$)': parseFloat(snapBilling.toFixed(2)),
-        'Faturamento Geral (R$)': parseFloat((snapBilling + snapOtherTotal).toFixed(2)),
-        'Total PVFs': snapPvfCount,
-        'Active Contracts': snapActiveContracts,
-        score: parsed.score
-      });
-    });
-
-    // 2. Add current active month as the live current calculation
-    const now = new Date();
-    const currentMonthStr = `${MONTH_LABELS[now.getMonth()]}/${now.getFullYear()}`;
-    const currentParsed = parseReferenceMonth(currentMonthStr);
-
-    const currentOtherTotal = umTelecomStats.grandTotal + starlinkStats.grandTotal + vectraStats.grandTotal + totalCcBilling;
-
-    compiledMonthsMap.set(currentMonthStr, {
-      name: currentMonthStr,
-      'Faturamento (R$)': parseFloat(totalBilling.toFixed(2)),
-      'Faturamento Geral (R$)': parseFloat((totalBilling + currentOtherTotal).toFixed(2)),
-      'Total PVFs': totalPvfsCount,
-      'Active Contracts': activeContractCount,
-      score: currentParsed.score
-    });
-
-    // Ensure Março/2026 is added dynamically to the chart if missing
-    if (!compiledMonthsMap.has('Março/2026')) {
-      const monthFilteredPvf = dbPvfRecords.filter(r => r.referenceMonth === 'Março/2026');
-      const mergedPvf = contracts.map(c => {
-        const custom = monthFilteredPvf.find(r => r.id === c.id);
-        if (custom) return { ...c, ...custom };
-        return { ...c, referenceMonth: 'Março/2026' };
-      });
-      const existingIds = new Set(contracts.map(c => c.id));
-      const newCustomContracts = monthFilteredPvf.filter(r => !existingIds.has(r.id));
-      const activeContractsMar = [...mergedPvf, ...newCustomContracts];
-
-      let pBilling = activeContractsMar
-        .filter(c => (c.status || '').trim().toLowerCase() === 'ativo')
-        .reduce((acc, c) => acc + getContractValue(c, prices), 0);
-
-      let pPvfCount = activeContractsMar
-        .filter(c => (c.status || '').trim().toLowerCase() === 'ativo')
-        .reduce((acc, c) => acc + getContractPvfTotal(c), 0);
-
-      let pActiveContracts = activeContractsMar.filter(c => (c.status || '').trim().toLowerCase() === 'ativo').length;
-
-      if (user && user.role === 'cliente') {
-        const allowed = user.secretarias || [];
-        const filteredContracts = activeContractsMar.filter(c => allowed.includes(c.secretaria));
-        pBilling = filteredContracts.reduce((acc, c) => {
-          if ((c.status || '').trim().toLowerCase() === 'ativo') return acc + getContractValue(c, prices);
-          return acc;
-        }, 0);
-        pPvfCount = filteredContracts.reduce((acc, c) => {
-          if ((c.status || '').trim().toLowerCase() === 'ativo') return acc + getContractPvfTotal(c);
-          return acc;
-        }, 0);
-        pActiveContracts = filteredContracts.filter(c => (c.status || '').trim().toLowerCase() === 'ativo').length;
-      }
-
-      const pOtherTotal = getOtherServicesBillingForMonth('Março/2026');
-      
-      if (pBilling === 0) {
-        pBilling = 432340.50; // realistic baseline representing active contracts
-        pPvfCount = 371;      // realistic point count
-        pActiveContracts = 4; // active contracts
-      }
-
-      const parsedMar = parseReferenceMonth('Março/2026');
-
-      compiledMonthsMap.set('Março/2026', {
-        name: 'Março/2026',
-        'Faturamento (R$)': parseFloat(pBilling.toFixed(2)),
-        'Faturamento Geral (R$)': parseFloat((pBilling + pOtherTotal).toFixed(2)),
-        'Total PVFs': pPvfCount,
-        'Active Contracts': pActiveContracts,
-        score: parsedMar.score
-      });
-    }
-
-    // Force Janeiro/2026 and Fevereiro/2026 to be zeroed out
-    for (const [key, val] of compiledMonthsMap.entries()) {
-      if (key === 'Janeiro/2026' || key === 'Fevereiro/2026') {
-        compiledMonthsMap.set(key, {
-          ...val,
-          'Faturamento (R$)': 0,
-          'Faturamento Geral (R$)': 0,
-          'Total PVFs': 0,
-          'Active Contracts': 0
+        if (user && user.role === 'cliente') {
+          const allowed = user.secretarias || [];
+          const filteredContracts = (snap.contracts || []).filter(c => allowed.includes(c.secretaria));
+          pvfBilling = filteredContracts.reduce((acc, c) => {
+            const s = (c.status || '').trim().toLowerCase();
+            if (s === 'ativo' || s === 'ativa') {
+              return acc + getContractValue(c, snap.prices || prices);
+            }
+            return acc;
+          }, 0);
+          pvfPoints = filteredContracts.reduce((acc, c) => {
+            const s = (c.status || '').trim().toLowerCase();
+            if (s === 'ativo' || s === 'ativa') {
+              return acc + getContractPvfTotal(c);
+            }
+            return acc;
+          }, 0);
+          activeContractsCount = filteredContracts.filter(c => {
+            const s = (c.status || '').trim().toLowerCase();
+            return s === 'ativo' || s === 'ativa';
+          }).length;
+        }
+      } else if (m === referenceMonth) {
+        pvfBilling = totalBilling;
+        pvfPoints = totalPvfsCount;
+        activeContractsCount = activeContractCount;
+      } else {
+        const monthFilteredPvf = dbPvfRecords.filter(r => r.referenceMonth === m);
+        const mergedPvf = contracts.map(c => {
+          const custom = monthFilteredPvf.find(r => r.id === c.id);
+          if (custom) return { ...c, ...custom };
+          return { ...c, referenceMonth: m };
         });
+        const existingIds = new Set(contracts.map(c => c.id));
+        const newCustomContracts = monthFilteredPvf.filter(r => !existingIds.has(r.id));
+        const activeContractsM = [...mergedPvf, ...newCustomContracts];
+
+        let contractsToCount = activeContractsM;
+        if (user && user.role === 'cliente') {
+          const allowed = user.secretarias || [];
+          contractsToCount = activeContractsM.filter(c => allowed.includes(c.secretaria));
+        }
+
+        pvfBilling = contractsToCount
+          .filter(c => {
+            const s = (c.status || '').trim().toLowerCase();
+            return s === 'ativo' || s === 'ativa';
+          })
+          .reduce((acc, c) => acc + getContractValue(c, prices), 0);
+
+        pvfPoints = contractsToCount
+          .filter(c => {
+            const s = (c.status || '').trim().toLowerCase();
+            return s === 'ativo' || s === 'ativa';
+          })
+          .reduce((acc, c) => acc + getContractPvfTotal(c), 0);
+
+        activeContractsCount = contractsToCount.filter(c => {
+          const s = (c.status || '').trim().toLowerCase();
+          return s === 'ativo' || s === 'ativa';
+        }).length;
       }
+
+      // 2. Demais serviços
+      let otherTotal = 0;
+      if (m === referenceMonth) {
+        otherTotal = umTelecomStats.grandTotal + starlinkStats.grandTotal + vectraStats.grandTotal + totalCcBilling;
+      } else {
+        otherTotal = getOtherServicesBillingForMonth(m);
+      }
+
+      return {
+        name: m,
+        shortName: formatShortMonth(m),
+        'Faturamento (R$)': parseFloat(pvfBilling.toFixed(2)),
+        'Faturamento Geral (R$)': parseFloat((pvfBilling + otherTotal).toFixed(2)),
+        'Total PVFs': pvfPoints,
+        'Active Contracts': activeContractsCount,
+        score: parseReferenceMonth(m).score
+      };
+    };
+
+    // Calculate last 12 months up to referenceMonth
+    let curr = referenceMonth;
+    const targetMonths: string[] = [];
+    for (let i = 0; i < 12; i++) {
+      targetMonths.unshift(curr);
+      curr = getPreviousMonth(curr);
     }
 
-    // 3. Convert map to sorted array
-    return Array.from(compiledMonthsMap.values())
-      .sort((a, b) => a.score - b.score);
-  }, [savedSnapshots, totalBilling, totalPvfsCount, user, prices, activeContractCount, dbUmRecords, dbStarlinkRecords, dbVectraRecords, umTelecomStats.grandTotal, starlinkStats.grandTotal, vectraStats.grandTotal, totalCcBilling, dbCcRecords, ccPrices, dbPvfRecords, contracts]);
+    const results = targetMonths.map(m => getBillingDataForMonth(m));
+
+    return results.sort((a, b) => a.score - b.score);
+  }, [
+    savedSnapshots,
+    totalBilling,
+    totalPvfsCount,
+    user,
+    prices,
+    activeContractCount,
+    dbUmRecords,
+    dbStarlinkRecords,
+    dbVectraRecords,
+    umTelecomStats.grandTotal,
+    starlinkStats.grandTotal,
+    vectraStats.grandTotal,
+    totalCcBilling,
+    dbCcRecords,
+    ccPrices,
+    dbPvfRecords,
+    contracts,
+    referenceMonth,
+    umTelecomPrices,
+    starlinkPrices,
+    vectraPrices
+  ]);
+
+  // Sliced data containing only the last 3 months for the monthly trend charts
+  const last3MonthsBillingData = useMemo(() => {
+    return monthlyBillingData.slice(-3);
+  }, [monthlyBillingData]);
+
+  const modal12mHistory = useMemo(() => {
+    if (!modalProvider) return [];
+    if (modalProvider === 'pvf-monthly') {
+      return monthlyBillingData.map(d => {
+        const val = d['Faturamento (R$)'] || 0;
+        const kVal = val >= 1000000 
+          ? `R$ ${(val / 1000000).toFixed(1)}M` 
+          : val >= 1000 
+          ? `R$ ${(val / 1000).toFixed(1)}k` 
+          : formatCurrency(val);
+        return {
+          month: d.name,
+          shortName: d.shortName || formatShortMonth(d.name),
+          value: val,
+          formatted: formatCurrency(val),
+          kVal,
+          pvfCount: d['Total PVFs']
+        };
+      });
+    }
+    if (modalProvider === 'general-monthly') {
+      return monthlyBillingData.map(d => {
+        const val = d['Faturamento Geral (R$)'] || 0;
+        const pvfVal = d['Faturamento (R$)'] || 0;
+        const otherVal = Math.max(0, val - pvfVal);
+        const kVal = val >= 1000000 
+          ? `R$ ${(val / 1000000).toFixed(1)}M` 
+          : val >= 1000 
+          ? `R$ ${(val / 1000).toFixed(1)}k` 
+          : formatCurrency(val);
+        return {
+          month: d.name,
+          shortName: d.shortName || formatShortMonth(d.name),
+          value: val,
+          formatted: formatCurrency(val),
+          kVal,
+          pvfVal,
+          otherVal
+        };
+      });
+    }
+    return getProviderHistory(modalProvider, 12);
+  }, [modalProvider, referenceMonth, dbUmRecords, dbStarlinkRecords, dbVectraRecords, umTelecomPrices, starlinkPrices, vectraPrices, monthlyBillingData]);
 
   const billingComparison = useMemo(() => {
     if (monthlyBillingData.length === 0) {
@@ -1834,11 +2074,20 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
 
       {/* 2. SECTION: PONTO DE VOZ FIXO */}
       <div className="space-y-4">
-        <div className="flex items-center gap-2 border-b border-zinc-200/70 dark:border-zinc-800 pb-2">
-          <Phone className="h-4.5 w-4.5 text-emerald-500" />
-          <h3 className="text-xs font-black uppercase text-zinc-700 dark:text-zinc-300 tracking-wider font-display">
-            Ponto de Voz Fixo (PVF)
-          </h3>
+        <div 
+          onClick={() => onSelectTab?.('contratos')}
+          className="flex items-center justify-between border-b border-zinc-200/70 dark:border-zinc-800 pb-2 cursor-pointer group"
+          title="Clique para ir para a tabela de Contratos PVF"
+        >
+          <div className="flex items-center gap-2">
+            <Phone className="h-4.5 w-4.5 text-emerald-500 group-hover:scale-110 transition-transform" />
+            <h3 className="text-xs font-black uppercase text-zinc-700 dark:text-zinc-300 tracking-wider font-display group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+              Ponto de Voz Fixo (PVF)
+            </h3>
+          </div>
+          <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 group-hover:translate-x-0.5 transition-transform flex items-center">
+            Ver contratos &rarr;
+          </span>
         </div>
 
         {/* KPI CARDS GRID */}
@@ -1982,11 +2231,20 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
 
       {/* CONTACT CENTER SECTION */}
       <div className="space-y-4">
-        <div className="flex items-center gap-2 border-b border-zinc-200/70 dark:border-zinc-800 pb-2">
-          <Headset className="h-4.5 w-4.5 text-violet-500" />
-          <h3 className="text-xs font-black uppercase text-zinc-700 dark:text-zinc-300 tracking-wider font-display">
-            Contact Center
-          </h3>
+        <div 
+          onClick={() => onSelectTab?.('contact-center')}
+          className="flex items-center justify-between border-b border-zinc-200/70 dark:border-zinc-800 pb-2 cursor-pointer group"
+          title="Clique para ir para o painel de Contact Center"
+        >
+          <div className="flex items-center gap-2">
+            <Headset className="h-4.5 w-4.5 text-violet-500 group-hover:scale-110 transition-transform" />
+            <h3 className="text-xs font-black uppercase text-zinc-700 dark:text-zinc-300 tracking-wider font-display group-hover:text-violet-600 dark:group-hover:text-violet-400 transition-colors">
+              Contact Center
+            </h3>
+          </div>
+          <span className="text-[10px] font-bold text-violet-600 dark:text-violet-400 group-hover:translate-x-0.5 transition-transform flex items-center">
+            Ver painel completo &rarr;
+          </span>
         </div>
 
         {/* CC KPI CARDS GRID */}
@@ -2108,156 +2366,551 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          {/* UM TELECOM CARD */}
-          <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xs border border-zinc-200/80 dark:border-zinc-800/85 p-5 relative overflow-hidden group hover:shadow-md transition-all border-l-4 border-l-[#1275B8] flex flex-col justify-between" id="kpi-um-telecom-consol">
-            <div className="space-y-3.5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-sm font-black text-[#1275B8] dark:text-[#42a5f5] block tracking-tight">Um Telecom</span>
-                  <span className="text-[10px] text-zinc-400 block font-medium">Infraestruturas PCM & Elétrica</span>
+          {/* COLUMN 1: UM TELECOM */}
+          <div className="flex flex-col gap-3.5 h-full">
+            {/* KPI CARD */}
+            <div 
+              onClick={() => onSelectTab?.('um-telecom')}
+              className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xs border border-zinc-200/80 dark:border-zinc-800/85 p-5 relative overflow-hidden group hover:shadow-md hover:border-[#1275B8]/40 transition-all border-l-4 border-l-[#1275B8] flex flex-col justify-between cursor-pointer h-full" 
+              id="kpi-um-telecom-consol"
+              title="Clique para ir para o painel da Um Telecom"
+            >
+              <div className="space-y-3.5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-sm font-black text-[#1275B8] dark:text-[#42a5f5] block tracking-tight group-hover:underline">Um Telecom</span>
+                    <span className="text-[10px] text-zinc-400 block font-medium">Infraestruturas PCM & Elétrica</span>
+                  </div>
+                  <div className="p-2.5 bg-[#1275B8]/10 text-[#1275B8] rounded-xl border border-[#1275B8]/15 group-hover:scale-110 transition-transform">
+                    <Zap className="h-4.5 w-4.5 shrink-0" />
+                  </div>
                 </div>
-                <div className="p-2.5 bg-[#1275B8]/10 text-[#1275B8] rounded-xl border border-[#1275B8]/15">
-                  <Zap className="h-4.5 w-4.5 shrink-0" />
+
+                <div className="space-y-1">
+                  <div className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Faturamento Líquido</div>
+                  <div className="text-2xl font-extrabold text-zinc-950 dark:text-white font-mono leading-none flex items-baseline gap-1">
+                    <span className="text-sm font-normal text-zinc-400">R$</span>
+                    <span>{umTelecomStats.grandTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+
+                <div className="border-t border-zinc-105 dark:border-zinc-800/65 pt-3 flex flex-col gap-1.5 font-mono text-[10.5px]">
+                  <div className="flex items-center justify-between text-zinc-500">
+                    <span>Franquia Base PCM:</span>
+                    <span className="text-zinc-800 dark:text-white font-bold">{Number(umTelecomPrices.franchiseBaseCost ?? 19939.75).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-zinc-500">
+                    <span>O.S. Elétrica (Básica):</span>
+                    <span className="text-zinc-800 dark:text-white font-bold">
+                      {umTelecomStats.basicCount} ch
+                      {umTelecomStats.excessBasica > 0 && <span className="text-[#1275B8] ml-1">({umTelecomStats.excessBasica} exc)</span>}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-zinc-500">
+                    <span>O.S. Elétrica (Crítica):</span>
+                    <span className="text-zinc-800 dark:text-white font-bold">
+                      {umTelecomStats.criticalCount} ch
+                      {umTelecomStats.excessCritica > 0 && <span className="text-[#1275B8] ml-1">({umTelecomStats.excessCritica} exc)</span>}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-zinc-500">
+                    <span>Manutenção PCM:</span>
+                    <span className="text-zinc-800 dark:text-white font-bold">{umTelecomStats.maintenanceCount} ch</span>
+                  </div>
                 </div>
               </div>
 
-              <div className="space-y-1">
-                <div className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Faturamento Líquido</div>
-                <div className="text-2xl font-extrabold text-zinc-950 dark:text-white font-mono leading-none flex items-baseline gap-1">
-                  <span className="text-sm font-normal text-zinc-400">R$</span>
-                  <span>{umTelecomStats.grandTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <div className="text-[10px] text-zinc-405 items-center justify-between mt-4 pt-2.5 border-t border-zinc-100 dark:border-zinc-800/40 font-medium flex">
+                <div className="inline-flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                  <span>Baseado em {umTelecomStats.totalCount} atendimentos</span>
                 </div>
-              </div>
-
-              <div className="border-t border-zinc-105 dark:border-zinc-800/65 pt-3 flex flex-col gap-1.5 font-mono text-[10.5px]">
-                <div className="flex items-center justify-between text-zinc-500">
-                  <span>Franquia Base PCM:</span>
-                  <span className="text-zinc-800 dark:text-white font-bold">{Number(umTelecomPrices.franchiseBaseCost ?? 19939.75).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                </div>
-                <div className="flex items-center justify-between text-zinc-500">
-                  <span>O.S. Elétrica (Básica):</span>
-                  <span className="text-zinc-800 dark:text-white font-bold">
-                    {umTelecomStats.basicCount} ch
-                    {umTelecomStats.excessBasica > 0 && <span className="text-[#1275B8] ml-1">({umTelecomStats.excessBasica} exc)</span>}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-zinc-500">
-                  <span>O.S. Elétrica (Crítica):</span>
-                  <span className="text-zinc-800 dark:text-white font-bold">
-                    {umTelecomStats.criticalCount} ch
-                    {umTelecomStats.excessCritica > 0 && <span className="text-[#1275B8] ml-1">({umTelecomStats.excessCritica} exc)</span>}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-zinc-500">
-                  <span>Manutenção PCM:</span>
-                  <span className="text-zinc-800 dark:text-white font-bold">{umTelecomStats.maintenanceCount} ch</span>
-                </div>
+                <span className="text-[#1275B8] dark:text-[#42a5f5] font-bold text-[10px] group-hover:translate-x-0.5 transition-transform inline-flex items-center">
+                  Ver detalhes &rarr;
+                </span>
               </div>
             </div>
 
-            <div className="text-[10px] text-zinc-405 items-center gap-1 mt-4 pt-2.5 border-t border-zinc-100 dark:border-zinc-800/40 inline-flex font-medium">
-              <CheckCircle2 className="h-3 w-3 text-emerald-500" />
-              <span>Baseado em {umTelecomStats.totalCount} atendimentos</span>
+            {/* MINI CHART CARD (3 MONTHS) */}
+            <div 
+              onClick={(e) => {
+                e.stopPropagation();
+                setModalProvider('um-telecom');
+              }}
+              className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xs border border-zinc-200/80 dark:border-zinc-800/85 p-4 hover:border-[#1275B8]/60 hover:shadow-md transition-all cursor-pointer group flex flex-col justify-between border-t-2 border-t-[#1275B8]"
+              title="Clique para ver o gráfico de 12 meses"
+            >
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-1.5">
+                  <BarChart2 className="h-3.5 w-3.5 text-[#1275B8]" />
+                  <span className="text-[11px] font-bold text-zinc-700 dark:text-zinc-200">
+                    Evolução (3 Meses)
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 text-[10px] font-bold text-[#1275B8] bg-[#1275B8]/10 px-2 py-0.5 rounded-lg group-hover:bg-[#1275B8] group-hover:text-white transition-colors">
+                  <span>12 Meses</span>
+                  <Maximize2 className="h-2.5 w-2.5" />
+                </div>
+              </div>
+
+              <div className="h-[110px] w-full mt-1">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={um3mHistory} margin={{ top: 18, right: 10, left: 10, bottom: 0 }}>
+                    <XAxis 
+                      dataKey="shortName" 
+                      tick={{ fontSize: 10, fill: '#888888', fontWeight: 600 }} 
+                      axisLine={false} 
+                      tickLine={false} 
+                    />
+                    <Tooltip content={<CustomMiniTooltip providerColor="#1275B8" />} />
+                    <Bar dataKey="value" radius={[4, 4, 0, 0]} fill="#1275B8" isAnimationActive={false}>
+                      <LabelList 
+                        dataKey="kVal" 
+                        position="top" 
+                        style={{ fontSize: '9px', fontWeight: 'bold', fill: '#1275B8' }} 
+                      />
+                      {um3mHistory.map((entry, index) => (
+                        <Cell 
+                          key={`um-3m-cell-${index}`} 
+                          fill={entry.month === referenceMonth ? '#1275B8' : '#1275B8b3'} 
+                          stroke={entry.month === referenceMonth ? '#ffffff' : 'none'}
+                          strokeWidth={entry.month === referenceMonth ? 1.5 : 0}
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-800/50 flex items-center justify-between text-[9.5px] font-semibold text-zinc-400 group-hover:text-zinc-600 dark:group-hover:text-zinc-300 transition-colors">
+                <span>Clique para expandir</span>
+                <span className="text-[#1275B8] dark:text-[#42a5f5] font-bold group-hover:underline flex items-center gap-0.5">
+                  Ver 12 meses &rarr;
+                </span>
+              </div>
             </div>
           </div>
 
-          {/* STARLINK CARD */}
-          <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xs border border-zinc-200/80 dark:border-zinc-800/85 p-5 relative overflow-hidden group hover:shadow-md transition-all border-l-4 border-l-amber-500 flex flex-col justify-between" id="kpi-starlink-consol">
-            <div className="space-y-3.5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-sm font-black text-amber-500 dark:text-amber-400 block tracking-tight">Starlink UT</span>
-                  <span className="text-[10px] text-zinc-400 block font-medium">Satélites de Órbita Baixa</span>
+          {/* COLUMN 2: STARLINK */}
+          <div className="flex flex-col gap-3.5 h-full">
+            {/* KPI CARD */}
+            <div 
+              onClick={() => onSelectTab?.('starlink')}
+              className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xs border border-zinc-200/80 dark:border-zinc-800/85 p-5 relative overflow-hidden group hover:shadow-md hover:border-amber-500/40 transition-all border-l-4 border-l-amber-500 flex flex-col justify-between cursor-pointer h-full" 
+              id="kpi-starlink-consol"
+              title="Clique para ir para o painel da Starlink UT"
+            >
+              <div className="space-y-3.5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-sm font-black text-amber-500 dark:text-amber-400 block tracking-tight group-hover:underline">Starlink UT</span>
+                    <span className="text-[10px] text-zinc-400 block font-medium">Satélites de Órbita Baixa</span>
+                  </div>
+                  <div className="p-2.5 bg-amber-500/10 text-amber-500 rounded-xl border border-amber-500/15 group-hover:scale-110 transition-transform">
+                    <Globe className="h-4.5 w-4.5 shrink-0" />
+                  </div>
                 </div>
-                <div className="p-2.5 bg-amber-500/10 text-amber-500 rounded-xl border border-amber-500/15">
-                  <Globe className="h-4.5 w-4.5 shrink-0" />
+
+                <div className="space-y-1">
+                  <div className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Faturamento Sob Demanda</div>
+                  <div className="text-2xl font-extrabold text-zinc-950 dark:text-white font-mono leading-none flex items-baseline gap-1">
+                    <span className="text-sm font-normal text-zinc-400">R$</span>
+                    <span>{starlinkStats.grandTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+
+                <div className="border-t border-zinc-105 dark:border-zinc-800/65 pt-3 flex flex-col gap-1.5 font-mono text-[10.5px]">
+                  <div className="flex items-center justify-between text-zinc-500">
+                    <span>Conexões Interior:</span>
+                    <span className="text-zinc-800 dark:text-white font-bold">
+                      {starlinkStats.countInterior} un
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-zinc-500">
+                    <span>Conexões F. Noronha:</span>
+                    <span className="text-zinc-800 dark:text-white font-bold">
+                      {starlinkStats.countNoronha} un
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-zinc-500">
+                    <span>Ativações PCM LEO:</span>
+                    <span className="text-zinc-800 dark:text-white font-bold">
+                      {starlinkStats.countPCM} un
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-zinc-500">
+                    <span>Pacote Base LEO:</span>
+                    <span className="text-zinc-800 dark:text-white font-bold">Ativo</span>
+                  </div>
                 </div>
               </div>
 
-              <div className="space-y-1">
-                <div className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Faturamento Sob Demanda</div>
-                <div className="text-2xl font-extrabold text-zinc-950 dark:text-white font-mono leading-none flex items-baseline gap-1">
-                  <span className="text-sm font-normal text-zinc-400">R$</span>
-                  <span>{starlinkStats.grandTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <div className="text-[10px] text-zinc-405 items-center justify-between mt-4 pt-2.5 border-t border-zinc-100 dark:border-zinc-800/40 font-medium flex">
+                <div className="inline-flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                  <span>Baseado em {starlinkStats.totalCount} pontos ativos</span>
                 </div>
-              </div>
-
-              <div className="border-t border-zinc-105 dark:border-zinc-800/65 pt-3 flex flex-col gap-1.5 font-mono text-[10.5px]">
-                <div className="flex items-center justify-between text-zinc-500">
-                  <span>Conexões Interior:</span>
-                  <span className="text-zinc-800 dark:text-white font-bold">
-                    {starlinkStats.countInterior} un
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-zinc-500">
-                  <span>Conexões F. Noronha:</span>
-                  <span className="text-zinc-800 dark:text-white font-bold">
-                    {starlinkStats.countNoronha} un
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-zinc-500">
-                  <span>Ativações PCM LEO:</span>
-                  <span className="text-zinc-800 dark:text-white font-bold">
-                    {starlinkStats.countPCM} un
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-transparent select-none pb-0.5">
-                  <span>Dummy:</span>
-                  <span>-</span>
-                </div>
+                <span className="text-amber-500 dark:text-amber-400 font-bold text-[10px] group-hover:translate-x-0.5 transition-transform inline-flex items-center">
+                  Ver detalhes &rarr;
+                </span>
               </div>
             </div>
 
-            <div className="text-[10px] text-zinc-405 items-center gap-1 mt-4 pt-2.5 border-t border-zinc-100 dark:border-zinc-800/40 inline-flex font-medium">
-              <CheckCircle2 className="h-3 w-3 text-emerald-500" />
-              <span>Baseado em {starlinkStats.totalCount} pontos ativos</span>
+            {/* MINI CHART CARD (3 MONTHS) */}
+            <div 
+              onClick={(e) => {
+                e.stopPropagation();
+                setModalProvider('starlink');
+              }}
+              className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xs border border-zinc-200/80 dark:border-zinc-800/85 p-4 hover:border-amber-500/60 hover:shadow-md transition-all cursor-pointer group flex flex-col justify-between border-t-2 border-t-amber-500"
+              title="Clique para ver o gráfico de 12 meses"
+            >
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-1.5">
+                  <BarChart2 className="h-3.5 w-3.5 text-amber-500" />
+                  <span className="text-[11px] font-bold text-zinc-700 dark:text-zinc-200">
+                    Evolução (3 Meses)
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-lg group-hover:bg-amber-500 group-hover:text-white transition-colors">
+                  <span>12 Meses</span>
+                  <Maximize2 className="h-2.5 w-2.5" />
+                </div>
+              </div>
+
+              <div className="h-[110px] w-full mt-1">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={starlink3mHistory} margin={{ top: 18, right: 10, left: 10, bottom: 0 }}>
+                    <XAxis 
+                      dataKey="shortName" 
+                      tick={{ fontSize: 10, fill: '#888888', fontWeight: 600 }} 
+                      axisLine={false} 
+                      tickLine={false} 
+                    />
+                    <Tooltip content={<CustomMiniTooltip providerColor="#f59e0b" />} />
+                    <Bar dataKey="value" radius={[4, 4, 0, 0]} fill="#f59e0b" isAnimationActive={false}>
+                      <LabelList 
+                        dataKey="kVal" 
+                        position="top" 
+                        style={{ fontSize: '9px', fontWeight: 'bold', fill: '#f59e0b' }} 
+                      />
+                      {starlink3mHistory.map((entry, index) => (
+                        <Cell 
+                          key={`starlink-3m-cell-${index}`} 
+                          fill={entry.month === referenceMonth ? '#f59e0b' : '#f59e0bb3'} 
+                          stroke={entry.month === referenceMonth ? '#ffffff' : 'none'}
+                          strokeWidth={entry.month === referenceMonth ? 1.5 : 0}
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-800/50 flex items-center justify-between text-[9.5px] font-semibold text-zinc-400 group-hover:text-zinc-600 dark:group-hover:text-zinc-300 transition-colors">
+                <span>Clique para expandir</span>
+                <span className="text-amber-600 dark:text-amber-400 font-bold group-hover:underline flex items-center gap-0.5">
+                  Ver 12 meses &rarr;
+                </span>
+              </div>
             </div>
           </div>
 
-          {/* VECTRA CARD */}
-          <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xs border border-zinc-200/80 dark:border-zinc-800/85 p-5 relative overflow-hidden group hover:shadow-md transition-all border-l-4 border-l-[#B6202F] flex flex-col justify-between" id="kpi-vectra-consol">
-            <div className="space-y-3.5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-sm font-black text-[#B6202F] dark:text-[#e53e4f] block tracking-tight">Vectra</span>
-                  <span className="text-[10px] text-zinc-400 block font-medium">Manutenção Wifi e Segurança UTM</span>
+          {/* COLUMN 3: VECTRA */}
+          <div className="flex flex-col gap-3.5 h-full">
+            {/* KPI CARD */}
+            <div 
+              onClick={() => onSelectTab?.('vectra')}
+              className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xs border border-zinc-200/80 dark:border-zinc-800/85 p-5 relative overflow-hidden group hover:shadow-md hover:border-[#B6202F]/40 transition-all border-l-4 border-l-[#B6202F] flex flex-col justify-between cursor-pointer h-full" 
+              id="kpi-vectra-consol"
+              title="Clique para ir para o painel da Vectra"
+            >
+              <div className="space-y-3.5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-sm font-black text-[#B6202F] dark:text-[#e53e4f] block tracking-tight group-hover:underline">Vectra</span>
+                    <span className="text-[10px] text-zinc-400 block font-medium">Manutenção Wifi e Segurança UTM</span>
+                  </div>
+                  <div className="p-2.5 bg-[#B6202F]/10 text-[#B6202F] rounded-xl border border-[#B6202F]/15 group-hover:scale-110 transition-transform">
+                    <Network className="h-4.5 w-4.5 shrink-0" />
+                  </div>
                 </div>
-                <div className="p-2.5 bg-[#B6202F]/10 text-[#B6202F] rounded-xl border border-[#B6202F]/15">
-                  <Network className="h-4.5 w-4.5 shrink-0" />
+
+                <div className="space-y-1">
+                  <div className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Faturamento da Franquia</div>
+                  <div className="text-2xl font-extrabold text-zinc-950 dark:text-white font-mono leading-none flex items-baseline gap-1">
+                    <span className="text-sm font-normal text-zinc-400">R$</span>
+                    <span>{vectraStats.grandTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+
+                <div className="border-t border-zinc-105 dark:border-zinc-800/65 pt-3 flex flex-col gap-1.5 font-mono text-[10.5px]">
+                  <div className="flex items-center justify-between text-zinc-500">
+                    <span>Franquia Base Wifi/UTM:</span>
+                    <span className="text-zinc-800 dark:text-white font-bold">
+                      {Number(vectraPrices.baseCostWifi ?? 39400.20).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-zinc-500">
+                    <span>Franquia Incluída:</span>
+                    <span className="text-zinc-800 dark:text-white font-bold">
+                      {vectraPrices.limitWifi ?? 60} chamados
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-zinc-500">
+                    <span>Chamados Atendidos:</span>
+                    <span className="text-zinc-800 dark:text-white font-bold">
+                      {vectraStats.wifiCount} ch
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-zinc-500">
+                    <span>Excedentes Wifi/UTM:</span>
+                    <span className="text-zinc-800 dark:text-white font-bold">
+                      {vectraStats.excessWifi > 0 ? `+${vectraStats.excessWifi} ch` : 'Nenhum'}
+                    </span>
+                  </div>
                 </div>
               </div>
 
-              <div className="space-y-1">
-                <div className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Faturamento da Franquia</div>
-                <div className="text-2xl font-extrabold text-zinc-950 dark:text-white font-mono leading-none flex items-baseline gap-1">
-                  <span className="text-sm font-normal text-zinc-400">R$</span>
-                  <span>{vectraStats.grandTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <div className="text-[10px] text-zinc-405 items-center justify-between mt-4 pt-2.5 border-t border-zinc-100 dark:border-zinc-800/40 font-medium flex">
+                <div className="inline-flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                  <span>Baseado em {vectraStats.totalCount} chamados apurados</span>
                 </div>
-              </div>
-
-              <div className="border-t border-zinc-105 dark:border-zinc-800/65 pt-3 flex flex-col gap-1.5 font-mono text-[10.5px]">
-                <div className="flex items-center justify-between text-zinc-500">
-                  <span>Chamados Wifi/UTM:</span>
-                  <span className="text-zinc-800 dark:text-white font-bold">
-                    {vectraStats.wifiCount} / {vectraPrices.limitWifi} ch
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-zinc-500">
-                  <span>Excedentes Wifi/UTM:</span>
-                  <span className="text-zinc-800 dark:text-white font-bold">
-                    {vectraStats.excessWifi > 0 ? `+${vectraStats.excessWifi} ch` : 'Nenhum'}
-                  </span>
-                </div>
+                <span className="text-[#B6202F] dark:text-[#e53e4f] font-bold text-[10px] group-hover:translate-x-0.5 transition-transform inline-flex items-center">
+                  Ver detalhes &rarr;
+                </span>
               </div>
             </div>
 
-            <div className="text-[10px] text-zinc-405 items-center gap-1 mt-4 pt-2.5 border-t border-zinc-100 dark:border-zinc-800/40 inline-flex font-medium">
-              <CheckCircle2 className="h-3 w-3 text-emerald-500" />
-              <span>Baseado em {vectraStats.totalCount} chamados apurados</span>
+            {/* MINI CHART CARD (3 MONTHS) */}
+            <div 
+              onClick={(e) => {
+                e.stopPropagation();
+                setModalProvider('vectra');
+              }}
+              className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xs border border-zinc-200/80 dark:border-zinc-800/85 p-4 hover:border-[#B6202F]/60 hover:shadow-md transition-all cursor-pointer group flex flex-col justify-between border-t-2 border-t-[#B6202F]"
+              title="Clique para ver o gráfico de 12 meses"
+            >
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-1.5">
+                  <BarChart2 className="h-3.5 w-3.5 text-[#B6202F]" />
+                  <span className="text-[11px] font-bold text-zinc-700 dark:text-zinc-200">
+                    Evolução (3 Meses)
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 text-[10px] font-bold text-[#B6202F] bg-[#B6202F]/10 px-2 py-0.5 rounded-lg group-hover:bg-[#B6202F] group-hover:text-white transition-colors">
+                  <span>12 Meses</span>
+                  <Maximize2 className="h-2.5 w-2.5" />
+                </div>
+              </div>
+
+              <div className="h-[110px] w-full mt-1">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={vectra3mHistory} margin={{ top: 18, right: 10, left: 10, bottom: 0 }}>
+                    <XAxis 
+                      dataKey="shortName" 
+                      tick={{ fontSize: 10, fill: '#888888', fontWeight: 600 }} 
+                      axisLine={false} 
+                      tickLine={false} 
+                    />
+                    <Tooltip content={<CustomMiniTooltip providerColor="#B6202F" />} />
+                    <Bar dataKey="value" radius={[4, 4, 0, 0]} fill="#B6202F" isAnimationActive={false}>
+                      <LabelList 
+                        dataKey="kVal" 
+                        position="top" 
+                        style={{ fontSize: '9px', fontWeight: 'bold', fill: '#B6202F' }} 
+                      />
+                      {vectra3mHistory.map((entry, index) => (
+                        <Cell 
+                          key={`vectra-3m-cell-${index}`} 
+                          fill={entry.month === referenceMonth ? '#B6202F' : '#B6202Fb3'} 
+                          stroke={entry.month === referenceMonth ? '#ffffff' : 'none'}
+                          strokeWidth={entry.month === referenceMonth ? 1.5 : 0}
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-800/50 flex items-center justify-between text-[9.5px] font-semibold text-zinc-400 group-hover:text-zinc-600 dark:group-hover:text-zinc-300 transition-colors">
+                <span>Clique para expandir</span>
+                <span className="text-[#B6202F] dark:text-[#e53e4f] font-bold group-hover:underline flex items-center gap-0.5">
+                  Ver 12 meses &rarr;
+                </span>
+              </div>
             </div>
           </div>
         </div>
       </div>
+
+      {/* MODAL 12 MESES EVOLUÇÃO */}
+      {modalProvider && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-2xl max-w-4xl w-full p-6 space-y-6 overflow-y-auto max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between border-b border-zinc-100 dark:border-zinc-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className={`p-3 rounded-2xl border ${
+                  modalProvider === 'um-telecom' ? 'bg-[#1275B8]/10 text-[#1275B8] border-[#1275B8]/20' :
+                  modalProvider === 'starlink' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' :
+                  modalProvider === 'vectra' ? 'bg-[#B6202F]/10 text-[#B6202F] border-[#B6202F]/20' :
+                  modalProvider === 'pvf-monthly' ? 'bg-indigo-500/10 text-indigo-500 border-indigo-500/20' :
+                  'bg-teal-500/10 text-teal-500 border-teal-500/20'
+                }`}>
+                  {modalProvider === 'um-telecom' && <Zap className="h-6 w-6" />}
+                  {modalProvider === 'starlink' && <Globe className="h-6 w-6" />}
+                  {modalProvider === 'vectra' && <Network className="h-6 w-6" />}
+                  {modalProvider === 'pvf-monthly' && <DollarSign className="h-6 w-6" />}
+                  {modalProvider === 'general-monthly' && <TrendingUp className="h-6 w-6" />}
+                </div>
+                <div>
+                  <h2 className="text-xl font-extrabold text-zinc-900 dark:text-white font-display flex items-center gap-2">
+                    <span>
+                      {modalProvider === 'um-telecom' && 'Um Telecom'}
+                      {modalProvider === 'starlink' && 'Starlink UT'}
+                      {modalProvider === 'vectra' && 'Vectra'}
+                      {modalProvider === 'pvf-monthly' && (isCliente ? 'Faturamento Mês a Mês (PVF)' : 'Faturamento Total Mês a Mês (PVF)')}
+                      {modalProvider === 'general-monthly' && 'Faturamento Total Geral Mês a Mês'}
+                    </span>
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 font-mono font-bold">12 Meses</span>
+                  </h2>
+                  <span className="text-xs font-semibold text-zinc-400 block mt-0.5">
+                    {modalProvider === 'pvf-monthly' && 'Evolução de Contratos PVF (Últimos 12 Meses)'}
+                    {modalProvider === 'general-monthly' && 'Evolução Consolidada - PVF + Demais Serviços (Últimos 12 Meses)'}
+                    {(modalProvider === 'um-telecom' || modalProvider === 'starlink' || modalProvider === 'vectra') && `Evolução do Faturamento Mensal (Referência: ${referenceMonth})`}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setModalProvider(null)}
+                className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            {(() => {
+              const currentVal = modal12mHistory.find(d => d.month === referenceMonth)?.value || modal12mHistory[modal12mHistory.length - 1]?.value || 0;
+              const totalVal = modal12mHistory.reduce((acc, d) => acc + d.value, 0);
+              const validMonths = modal12mHistory.filter(d => d.value > 0);
+              const avgVal = validMonths.length > 0 ? totalVal / validMonths.length : 0;
+              const maxItem = modal12mHistory.reduce((max, d) => d.value > max.value ? d : max, modal12mHistory[0] || { value: 0, month: '' });
+              const colorHex = 
+                modalProvider === 'um-telecom' ? '#1275B8' : 
+                modalProvider === 'starlink' ? '#f59e0b' : 
+                modalProvider === 'vectra' ? '#B6202F' :
+                modalProvider === 'pvf-monthly' ? '#6366f1' : '#0d9488';
+
+              return (
+                <div className="space-y-6">
+                  {/* Stats Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono">
+                    <div className="bg-zinc-50 dark:bg-zinc-950 p-3.5 rounded-2xl border border-zinc-200/60 dark:border-zinc-800/60">
+                      <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider block">Mês Selecionado</span>
+                      <span className="text-base font-extrabold text-zinc-900 dark:text-white block mt-0.5">{formatCurrency(currentVal)}</span>
+                      <span className="text-[9.5px] text-zinc-400 block mt-0.5">{referenceMonth}</span>
+                    </div>
+                    <div className="bg-zinc-50 dark:bg-zinc-950 p-3.5 rounded-2xl border border-zinc-200/60 dark:border-zinc-800/60">
+                      <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider block">Média Mensal</span>
+                      <span className="text-base font-extrabold text-zinc-900 dark:text-white block mt-0.5">{formatCurrency(avgVal)}</span>
+                      <span className="text-[9.5px] text-zinc-400 block mt-0.5">Base: {validMonths.length}m ativos</span>
+                    </div>
+                    <div className="bg-zinc-50 dark:bg-zinc-950 p-3.5 rounded-2xl border border-zinc-200/60 dark:border-zinc-800/60">
+                      <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider block">Pico Máximo</span>
+                      <span className="text-base font-extrabold text-zinc-900 dark:text-white block mt-0.5">{formatCurrency(maxItem.value)}</span>
+                      <span className="text-[9.5px] text-zinc-400 block mt-0.5">{maxItem.month}</span>
+                    </div>
+                    <div className="bg-zinc-50 dark:bg-zinc-950 p-3.5 rounded-2xl border border-zinc-200/60 dark:border-zinc-800/60">
+                      <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider block">Total 12 Meses</span>
+                      <span className="text-base font-extrabold text-zinc-900 dark:text-white block mt-0.5">{formatCurrency(totalVal)}</span>
+                      <span className="text-[9.5px] text-zinc-400 block mt-0.5">Acumulado do período</span>
+                    </div>
+                  </div>
+
+                  {/* Chart Container */}
+                  <div className="bg-zinc-50 dark:bg-zinc-950/60 p-5 rounded-2.5xl border border-zinc-200/60 dark:border-zinc-800/60">
+                    <div className="flex items-center justify-between mb-4">
+                      <span className="text-xs font-bold text-zinc-700 dark:text-zinc-200 flex items-center gap-1.5">
+                        <BarChart2 className="h-4 w-4" style={{ color: colorHex }} />
+                        Evolução Histórica de Faturamento (12 Meses)
+                      </span>
+                      <span className="text-[10px] text-zinc-400 font-mono">Valores apurados em BRL</span>
+                    </div>
+                    <div className="h-[280px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={modal12mHistory} margin={{ top: 20, right: 15, left: 10, bottom: 25 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#88888820" />
+                          <XAxis 
+                            dataKey="shortName" 
+                            tick={{ fontSize: 11, fill: '#888888', fontWeight: 600 }} 
+                            interval={0}
+                            angle={-25}
+                            textAnchor="end"
+                          />
+                          <YAxis 
+                            tick={{ fontSize: 10, fill: '#888888' }} 
+                            tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}
+                          />
+                          <Tooltip content={<Custom12MTooltip providerColor={colorHex} />} />
+                          <Bar dataKey="value" radius={[6, 6, 0, 0]} fill={colorHex} isAnimationActive={false}>
+                            <LabelList 
+                              dataKey="kVal" 
+                              position="top" 
+                              style={{ fontSize: '9px', fontWeight: 'bold', fill: colorHex }} 
+                            />
+                            {modal12mHistory.map((entry, index) => (
+                              <Cell 
+                                key={`modal-cell-${index}`} 
+                                fill={entry.month === referenceMonth ? colorHex : `${colorHex}b3`} 
+                                stroke={entry.month === referenceMonth ? '#ffffff' : 'none'}
+                                strokeWidth={entry.month === referenceMonth ? 2 : 0}
+                              />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between pt-4 border-t border-zinc-100 dark:border-zinc-800">
+              {modalProvider === 'um-telecom' || modalProvider === 'starlink' || modalProvider === 'vectra' ? (
+                <button
+                  onClick={() => {
+                    const tab = modalProvider;
+                    setModalProvider(null);
+                    if (tab) onSelectTab?.(tab);
+                  }}
+                  className="flex items-center gap-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-900 px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+                >
+                  <span>Acessar painel detalhado</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </button>
+              ) : (
+                <button
+                  onClick={() => setModalProvider(null)}
+                  className="flex items-center gap-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-900 px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+                >
+                  <span>Concluído</span>
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                </button>
+              )}
+              <button
+                onClick={() => setModalProvider(null)}
+                className="px-5 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-700 text-xs font-bold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* DETAILED CHARTS GRID - MOVED TO THE BOTTOM */}
       <div className="space-y-4 pt-4">
@@ -2275,7 +2928,7 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
           <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div>
               <h3 className="text-sm font-black uppercase text-zinc-850 dark:text-zinc-100 tracking-wide flex items-center gap-1.5 font-display">
-                <span className="w-2.5 h-2.5 rounded-full bg-brand animate-pulse"></span>
+                <span className="w-2.5 h-2.5 rounded-full bg-brand"></span>
                 <span>{isCliente ? 'Faturamento Líquido por Secretaria' : 'Faturamento Líquido por Secretaria (TOP 10)'}</span>
               </h3>
               <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">
@@ -2367,29 +3020,42 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
         </div>
 
         {/* CHART 2: Faturamento total mês a mês - vertical bars */}
-        <div id="monthly-billing-trend-chart" className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-zinc-200 dark:border-zinc-805 shadow-sm border-t-4 border-t-indigo-505 w-full">
+        <div 
+          id="monthly-billing-trend-chart" 
+          onClick={() => setModalProvider('pvf-monthly')}
+          className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-zinc-200 dark:border-zinc-805 shadow-sm border-t-4 border-t-indigo-505 w-full cursor-pointer group hover:border-indigo-500/40 transition-all"
+        >
           <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div>
-              <h3 className="text-sm font-black uppercase text-zinc-850 dark:text-zinc-100 tracking-wide flex items-center gap-1.5 font-display">
-                <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse"></span>
+              <h3 className="text-sm font-black uppercase text-zinc-850 dark:text-zinc-100 tracking-wide flex items-center gap-1.5 font-display group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                <span className="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
                 <span>{isCliente ? 'Faturamento Mês a Mês (PVF)' : 'Faturamento Total Mês a Mês (PVF)'}</span>
               </h3>
               <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">
                 {isCliente 
-                  ? 'Evolução mensal do faturamento de seus contratos ativos.' 
-                  : 'Evolução mensal do faturamento total consolidado de contratos de PVF.'}
+                  ? 'Evolução mensal do faturamento de seus contratos ativos (últimos 3 meses - clique para ver 12m).' 
+                  : 'Evolução mensal do faturamento total consolidado de contratos de PVF (últimos 3 meses - clique para ver 12m).'}
               </p>
             </div>
-            <div className="bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-3 py-1 rounded-full text-[10px] font-mono font-bold self-start sm:self-auto border border-zinc-200 dark:border-zinc-700">
-              Série Mensal
-            </div>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setModalProvider('pvf-monthly');
+              }}
+              className="bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 px-3.5 py-1.5 rounded-full text-[10px] font-mono font-bold self-start sm:self-auto border border-indigo-200 dark:border-indigo-800/80 flex items-center gap-1.5 cursor-pointer shadow-2xs hover:scale-105 transition-all"
+            >
+              <Maximize2 className="h-3 w-3 text-indigo-500" />
+              <span>Ver 12 Meses</span>
+            </button>
           </div>
 
           <div className="h-[430px] w-full text-xs font-mono">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
-                data={monthlyBillingData}
+                data={last3MonthsBillingData}
                 margin={{ top: 25, right: 10, left: 10, bottom: 20 }}
+                onClick={() => setModalProvider('pvf-monthly')}
               >
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" className="dark:stroke-zinc-800" />
                 <XAxis 
@@ -2429,7 +3095,7 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
                   }}
                 />
                 <Bar dataKey="Faturamento (R$)" fill="#6366f1" radius={[6, 6, 0, 0]} isAnimationActive={false}>
-                  {monthlyBillingData.map((entry, index) => (
+                  {last3MonthsBillingData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[(index + 1) % COLORS.length]} />
                   ))}
                   <LabelList 
@@ -2461,27 +3127,40 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
 
       {/* CHART 3: Faturamento total geral mês a mês */}
       {!isCliente && (
-        <div id="general-monthly-billing-trend-chart" className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-zinc-200 dark:border-zinc-805 shadow-sm border-t-4 border-t-teal-500 w-full">
+        <div 
+          id="general-monthly-billing-trend-chart" 
+          onClick={() => setModalProvider('general-monthly')}
+          className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-zinc-200 dark:border-zinc-805 shadow-sm border-t-4 border-t-teal-500 w-full cursor-pointer group hover:border-teal-500/40 transition-all"
+        >
           <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div>
-              <h3 className="text-sm font-black uppercase text-zinc-850 dark:text-zinc-100 tracking-wide flex items-center gap-1.5 font-display">
-                <span className="w-2.5 h-2.5 rounded-full bg-teal-500 animate-pulse"></span>
+              <h3 className="text-sm font-black uppercase text-zinc-850 dark:text-zinc-100 tracking-wide flex items-center gap-1.5 font-display group-hover:text-teal-600 dark:group-hover:text-teal-400 transition-colors">
+                <span className="w-2.5 h-2.5 rounded-full bg-teal-500"></span>
                 <span>Faturamento Total Geral Mês a Mês</span>
               </h3>
               <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">
-                Evolução mensal do faturamento total consolidado.
+                Evolução mensal do faturamento total consolidado (últimos 3 meses - clique para ver 12m).
               </p>
             </div>
-            <div className="bg-zinc-100 dark:bg-zinc-800 text-zinc-605 dark:text-zinc-300 px-3 py-1 rounded-full text-[10px] font-mono font-bold self-start sm:self-auto border border-zinc-200 dark:border-zinc-700">
-              Consolidado Geral
-            </div>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setModalProvider('general-monthly');
+              }}
+              className="bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900 text-teal-700 dark:text-teal-300 px-3.5 py-1.5 rounded-full text-[10px] font-mono font-bold self-start sm:self-auto border border-teal-200 dark:border-teal-800/80 flex items-center gap-1.5 cursor-pointer shadow-2xs hover:scale-105 transition-all"
+            >
+              <Maximize2 className="h-3 w-3 text-teal-500" />
+              <span>Ver 12 Meses</span>
+            </button>
           </div>
 
           <div className="h-[430px] w-full text-xs font-mono font-bold">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
-                data={monthlyBillingData}
+                data={last3MonthsBillingData}
                 margin={{ top: 25, right: 10, left: 10, bottom: 20 }}
+                onClick={() => setModalProvider('general-monthly')}
               >
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" className="dark:stroke-zinc-800" />
                 <XAxis 
@@ -2528,7 +3207,7 @@ export default function Dashboard({ contracts, prices, user }: DashboardProps) {
                   }}
                 />
                 <Bar dataKey="Faturamento Geral (R$)" fill="#0d9488" radius={[6, 6, 0, 0]} isAnimationActive={false}>
-                  {monthlyBillingData.map((entry, index) => (
+                  {last3MonthsBillingData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[(index + 3) % COLORS.length]} />
                   ))}
                   <LabelList 

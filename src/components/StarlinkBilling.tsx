@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
-import { db, handleFirestoreError, OperationType, onSnapshot, getDoc, setDoc, deleteDoc, writeBatch } from '../firebase';
+import { db, handleFirestoreError, OperationType, cleanUndefined, onSnapshot, getDoc, setDoc, deleteDoc, writeBatch } from '../firebase';
 import { collection, doc } from 'firebase/firestore';
 import { UserSession } from '../types';
 import { useCurrentMonthFilter, getCurrentMonth, getAvailableMonths } from '../utils/monthUtils';
@@ -182,6 +182,32 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
       setFormReferenceMonth(referenceMonth);
     }
   }, [referenceMonth, editingId]);
+
+  // Derive real-time duplicate warning for protocol number validation
+  const duplicateWarning = useMemo(() => {
+    const cleanInput = formProtocol.trim();
+    if (!cleanInput) return null;
+    const normalized = cleanInput.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const found = records.find(
+      (r) => r.id !== editingId && (r.protocol || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === normalized
+    );
+    if (found) {
+      return `Protocolo ${found.protocol} já cadastrado no mês ${found.referenceMonth} (${found.location}).`;
+    }
+    return null;
+  }, [formProtocol, records, editingId]);
+
+  // Count protocol occurrences across all records for warning badges in tables
+  const protocolCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    records.forEach((r) => {
+      const key = (r.protocol || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      if (key) {
+        counts[key] = (counts[key] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [records]);
 
   // Sync form default pricing when solution changes (unless in edit mode with a loaded value)
   useEffect(() => {
@@ -358,9 +384,15 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
     }
 
     // Prevenir protocolo duplicado
-    const isDuplicate = records.some(r => r.id !== editingId && r.protocol.trim() === formProtocol.trim());
-    if (isDuplicate) {
-      showToast("Já existe uma ordem de serviço cadastrada com este Protocolo.", "error");
+    const normalizedNew = formProtocol.trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const duplicateRecord = records.find(
+      r => r.id !== editingId && (r.protocol || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === normalizedNew
+    );
+    if (duplicateRecord) {
+      showToast(
+        `Impossível cadastrar: Protocolo ${formProtocol.trim()} já existe no sistema (${duplicateRecord.referenceMonth} - Local: ${duplicateRecord.location}).`,
+        "error"
+      );
       return;
     }
 
@@ -380,9 +412,12 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
         billingValue: value
       };
       setIsLoading(true);
-      setDoc(doc(db, 'starlinkRecords', editingId), updatedRecord)
+      setDoc(doc(db, 'starlinkRecords', editingId), cleanUndefined(updatedRecord))
         .then(() => {
           showToast("Ordem de serviço atualizada com sucesso!");
+          if (formReferenceMonth && formReferenceMonth !== referenceMonth) {
+            setReferenceMonth(formReferenceMonth);
+          }
           setEditingId(null);
           resetForm();
         })
@@ -408,9 +443,12 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
         billingValue: value
       };
       setIsLoading(true);
-      setDoc(doc(db, 'starlinkRecords', newId), newOS)
+      setDoc(doc(db, 'starlinkRecords', newId), cleanUndefined(newOS))
         .then(() => {
           showToast("Nova ordem de serviço cadastrada com sucesso!");
+          if (formReferenceMonth && formReferenceMonth !== referenceMonth) {
+            setReferenceMonth(formReferenceMonth);
+          }
           resetForm();
         })
         .catch((error) => {
@@ -1015,8 +1053,11 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
 
               {/* Field 2: PROTOCOLO */}
               <div>
-                <label className="block text-[11px] font-black uppercase text-zinc-400 tracking-wider mb-1.5 font-mono">
-                  PROTOCOLO / Nº OS (7 DÍGITOS)
+                <label className="block text-[11px] font-black uppercase text-zinc-400 tracking-wider mb-1.5 font-mono flex items-center justify-between">
+                  <span>PROTOCOLO / Nº OS (7 DÍGITOS)</span>
+                  {duplicateWarning && (
+                    <span className="text-rose-500 font-bold text-[9px] uppercase tracking-normal">⚠️ Duplicado</span>
+                  )}
                 </label>
                 <input
                   type="text"
@@ -1025,8 +1066,18 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
                   value={formProtocol}
                   onChange={(e) => setFormProtocol(e.target.value.replace(/\D/g, '').slice(0, 7))}
                   required
-                  className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                  className={`w-full bg-zinc-50 dark:bg-zinc-950 border rounded-xl px-3 py-2 text-xs font-bold text-zinc-800 dark:text-white focus:outline-none focus:ring-1 ${
+                    duplicateWarning
+                      ? 'border-rose-500 text-rose-600 focus:ring-rose-500 bg-rose-50/20 dark:bg-rose-950/20'
+                      : 'border-zinc-250 dark:border-zinc-800 focus:ring-cyan-500'
+                  }`}
                 />
+                {duplicateWarning && (
+                  <p className="text-[10px] font-bold text-rose-500 mt-1 flex items-start gap-1 leading-tight">
+                    <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
+                    <span>{duplicateWarning}</span>
+                  </p>
+                )}
               </div>
 
               {/* Field 2.2: O.S Relacionada */}
@@ -1143,9 +1194,12 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
               </button>
               <button
                 type="submit"
-                className="px-5 py-2 bg-cyan-650 hover:bg-cyan-700 bg-cyan-600 text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer"
+                disabled={!!duplicateWarning || isLoading}
+                className={`px-5 py-2 bg-cyan-650 hover:bg-cyan-700 bg-cyan-600 text-white rounded-xl text-xs font-black uppercase tracking-wider ${
+                  duplicateWarning || isLoading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer active:scale-95'
+                }`}
               >
-                {editingId ? 'Salvar Alterações' : 'Cadastrar OS'}
+                {isLoading ? 'Salvando...' : editingId ? 'Salvar Alterações' : 'Cadastrar OS'}
               </button>
             </div>
           </form>
@@ -1197,7 +1251,15 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
 
                     {/* PROTOCOLO */}
                     <td className="py-3.5 px-2 font-mono text-xs font-bold text-zinc-400">
-                      {item.protocol}
+                      <div className="flex items-center gap-1.5">
+                        <span>{item.protocol}</span>
+                        {protocolCounts[(item.protocol || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase()] > 1 && (
+                          <span className="inline-flex items-center gap-1 text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded-md font-mono" title="Este protocolo aparece mais de uma vez no sistema!">
+                            <AlertTriangle className="h-3 w-3 text-rose-500 shrink-0" />
+                            <span>DUPLICADO</span>
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* O.S Relacionada */}

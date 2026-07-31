@@ -1651,7 +1651,7 @@ export default function App() {
               transition={{ duration: 0.18, ease: "easeOut" }}
               className="space-y-6"
             >
-              {activeTab === 'dashboard' && user?.role !== 'parceiro' && isScreenAllowed('dashboard') && <Dashboard contracts={visibleContracts} prices={prices} user={user} />}
+              {activeTab === 'dashboard' && user?.role !== 'parceiro' && isScreenAllowed('dashboard') && <Dashboard contracts={visibleContracts} prices={prices} user={user} onSelectTab={(tab) => setActiveTab(tab as any)} />}
               {activeTab === 'contratos' && isScreenAllowed('contratos') && (
                 <ContractTable
                   contracts={visibleContracts}
