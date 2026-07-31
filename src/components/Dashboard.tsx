@@ -2747,26 +2747,26 @@ export default function Dashboard({ contracts, prices, user, onSelectTab }: Dash
 
       {/* MODAL 12 MESES EVOLUÇÃO */}
       {modalProvider && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-2xl max-w-4xl w-full p-6 space-y-6 overflow-y-auto max-h-[90vh]">
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-xs z-50 flex items-center justify-center p-3 sm:p-4 animate-fade-in">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl sm:rounded-3xl shadow-2xl max-w-5xl w-full p-4 sm:p-5 space-y-3.5 sm:space-y-4 max-h-[96vh] flex flex-col justify-between overflow-y-auto">
             {/* Modal Header */}
-            <div className="flex items-start justify-between border-b border-zinc-100 dark:border-zinc-800 pb-4">
-              <div className="flex items-center gap-3">
-                <div className={`p-3 rounded-2xl border ${
+            <div className="flex items-start justify-between border-b border-zinc-100 dark:border-zinc-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className={`p-2.5 rounded-xl border ${
                   modalProvider === 'um-telecom' ? 'bg-[#1275B8]/10 text-[#1275B8] border-[#1275B8]/20' :
                   modalProvider === 'starlink' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' :
                   modalProvider === 'vectra' ? 'bg-[#B6202F]/10 text-[#B6202F] border-[#B6202F]/20' :
                   modalProvider === 'pvf-monthly' ? 'bg-indigo-500/10 text-indigo-500 border-indigo-500/20' :
                   'bg-teal-500/10 text-teal-500 border-teal-500/20'
                 }`}>
-                  {modalProvider === 'um-telecom' && <Zap className="h-6 w-6" />}
-                  {modalProvider === 'starlink' && <Globe className="h-6 w-6" />}
-                  {modalProvider === 'vectra' && <Network className="h-6 w-6" />}
-                  {modalProvider === 'pvf-monthly' && <DollarSign className="h-6 w-6" />}
-                  {modalProvider === 'general-monthly' && <TrendingUp className="h-6 w-6" />}
+                  {modalProvider === 'um-telecom' && <Zap className="h-5 w-5" />}
+                  {modalProvider === 'starlink' && <Globe className="h-5 w-5" />}
+                  {modalProvider === 'vectra' && <Network className="h-5 w-5" />}
+                  {modalProvider === 'pvf-monthly' && <DollarSign className="h-5 w-5" />}
+                  {modalProvider === 'general-monthly' && <TrendingUp className="h-5 w-5" />}
                 </div>
                 <div>
-                  <h2 className="text-xl font-extrabold text-zinc-900 dark:text-white font-display flex items-center gap-2">
+                  <h2 className="text-lg sm:text-xl font-extrabold text-zinc-900 dark:text-white font-display flex items-center gap-2">
                     <span>
                       {modalProvider === 'um-telecom' && 'Um Telecom'}
                       {modalProvider === 'starlink' && 'Starlink UT'}
@@ -2774,9 +2774,9 @@ export default function Dashboard({ contracts, prices, user, onSelectTab }: Dash
                       {modalProvider === 'pvf-monthly' && (isCliente ? 'Faturamento Mês a Mês (PVF)' : 'Faturamento Total Mês a Mês (PVF)')}
                       {modalProvider === 'general-monthly' && 'Faturamento Total Geral Mês a Mês'}
                     </span>
-                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 font-mono font-bold">12 Meses</span>
+                    <span className="text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 font-mono font-bold">12 Meses</span>
                   </h2>
-                  <span className="text-xs font-semibold text-zinc-400 block mt-0.5">
+                  <span className="text-[11px] sm:text-xs font-semibold text-zinc-400 block mt-0.5">
                     {modalProvider === 'pvf-monthly' && 'Evolução de Contratos PVF (Últimos 12 Meses)'}
                     {modalProvider === 'general-monthly' && 'Evolução Consolidada - PVF + Demais Serviços (Últimos 12 Meses)'}
                     {(modalProvider === 'um-telecom' || modalProvider === 'starlink' || modalProvider === 'vectra') && `Evolução do Faturamento Mensal (Referência: ${referenceMonth})`}
@@ -2785,7 +2785,7 @@ export default function Dashboard({ contracts, prices, user, onSelectTab }: Dash
               </div>
               <button
                 onClick={() => setModalProvider(null)}
-                className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -2805,61 +2805,61 @@ export default function Dashboard({ contracts, prices, user, onSelectTab }: Dash
                 modalProvider === 'pvf-monthly' ? '#6366f1' : '#0d9488';
 
               return (
-                <div className="space-y-6">
+                <div className="space-y-3 sm:space-y-3.5">
                   {/* Stats Grid */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono">
-                    <div className="bg-zinc-50 dark:bg-zinc-950 p-3.5 rounded-2xl border border-zinc-200/60 dark:border-zinc-800/60">
-                      <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider block">Mês Selecionado</span>
-                      <span className="text-base font-extrabold text-zinc-900 dark:text-white block mt-0.5">{formatCurrency(currentVal)}</span>
-                      <span className="text-[9.5px] text-zinc-400 block mt-0.5">{referenceMonth}</span>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 font-mono">
+                    <div className="bg-zinc-50 dark:bg-zinc-950 p-2.5 sm:p-3 rounded-xl border border-zinc-200/60 dark:border-zinc-800/60">
+                      <span className="text-[9.5px] text-zinc-400 font-bold uppercase tracking-wider block">Mês Selecionado</span>
+                      <span className="text-sm sm:text-base font-extrabold text-zinc-900 dark:text-white block mt-0.5">{formatCurrency(currentVal)}</span>
+                      <span className="text-[9px] text-zinc-400 block mt-0.5">{referenceMonth}</span>
                     </div>
-                    <div className="bg-zinc-50 dark:bg-zinc-950 p-3.5 rounded-2xl border border-zinc-200/60 dark:border-zinc-800/60">
-                      <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider block">Média Mensal</span>
-                      <span className="text-base font-extrabold text-zinc-900 dark:text-white block mt-0.5">{formatCurrency(avgVal)}</span>
-                      <span className="text-[9.5px] text-zinc-400 block mt-0.5">Base: {validMonths.length}m ativos</span>
+                    <div className="bg-zinc-50 dark:bg-zinc-950 p-2.5 sm:p-3 rounded-xl border border-zinc-200/60 dark:border-zinc-800/60">
+                      <span className="text-[9.5px] text-zinc-400 font-bold uppercase tracking-wider block">Média Mensal</span>
+                      <span className="text-sm sm:text-base font-extrabold text-zinc-900 dark:text-white block mt-0.5">{formatCurrency(avgVal)}</span>
+                      <span className="text-[9px] text-zinc-400 block mt-0.5">Base: {validMonths.length}m ativos</span>
                     </div>
-                    <div className="bg-zinc-50 dark:bg-zinc-950 p-3.5 rounded-2xl border border-zinc-200/60 dark:border-zinc-800/60">
-                      <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider block">Pico Máximo</span>
-                      <span className="text-base font-extrabold text-zinc-900 dark:text-white block mt-0.5">{formatCurrency(maxItem.value)}</span>
-                      <span className="text-[9.5px] text-zinc-400 block mt-0.5">{maxItem.month}</span>
+                    <div className="bg-zinc-50 dark:bg-zinc-950 p-2.5 sm:p-3 rounded-xl border border-zinc-200/60 dark:border-zinc-800/60">
+                      <span className="text-[9.5px] text-zinc-400 font-bold uppercase tracking-wider block">Pico Máximo</span>
+                      <span className="text-sm sm:text-base font-extrabold text-zinc-900 dark:text-white block mt-0.5">{formatCurrency(maxItem.value)}</span>
+                      <span className="text-[9px] text-zinc-400 block mt-0.5">{maxItem.month}</span>
                     </div>
-                    <div className="bg-zinc-50 dark:bg-zinc-950 p-3.5 rounded-2xl border border-zinc-200/60 dark:border-zinc-800/60">
-                      <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider block">Total 12 Meses</span>
-                      <span className="text-base font-extrabold text-zinc-900 dark:text-white block mt-0.5">{formatCurrency(totalVal)}</span>
-                      <span className="text-[9.5px] text-zinc-400 block mt-0.5">Acumulado do período</span>
+                    <div className="bg-zinc-50 dark:bg-zinc-950 p-2.5 sm:p-3 rounded-xl border border-zinc-200/60 dark:border-zinc-800/60">
+                      <span className="text-[9.5px] text-zinc-400 font-bold uppercase tracking-wider block">Total 12 Meses</span>
+                      <span className="text-sm sm:text-base font-extrabold text-zinc-900 dark:text-white block mt-0.5">{formatCurrency(totalVal)}</span>
+                      <span className="text-[9px] text-zinc-400 block mt-0.5">Acumulado do período</span>
                     </div>
                   </div>
 
                   {/* Chart Container */}
-                  <div className="bg-zinc-50 dark:bg-zinc-950/60 p-5 rounded-2.5xl border border-zinc-200/60 dark:border-zinc-800/60">
-                    <div className="flex items-center justify-between mb-4">
+                  <div className="bg-zinc-50 dark:bg-zinc-950/60 p-3.5 sm:p-4 rounded-2xl border border-zinc-200/60 dark:border-zinc-800/60">
+                    <div className="flex items-center justify-between mb-2">
                       <span className="text-xs font-bold text-zinc-700 dark:text-zinc-200 flex items-center gap-1.5">
                         <BarChart2 className="h-4 w-4" style={{ color: colorHex }} />
                         Evolução Histórica de Faturamento (12 Meses)
                       </span>
                       <span className="text-[10px] text-zinc-400 font-mono">Valores apurados em BRL</span>
                     </div>
-                    <div className="h-[280px] w-full">
+                    <div className="h-[210px] sm:h-[220px] w-full">
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={modal12mHistory} margin={{ top: 20, right: 15, left: 10, bottom: 25 }}>
+                        <BarChart data={modal12mHistory} margin={{ top: 18, right: 10, left: 0, bottom: 15 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#88888820" />
                           <XAxis 
                             dataKey="shortName" 
-                            tick={{ fontSize: 11, fill: '#888888', fontWeight: 600 }} 
+                            tick={{ fontSize: 10, fill: '#888888', fontWeight: 600 }} 
                             interval={0}
-                            angle={-25}
-                            textAnchor="end"
+                            angle={0}
+                            textAnchor="middle"
                           />
                           <YAxis 
-                            tick={{ fontSize: 10, fill: '#888888' }} 
+                            tick={{ fontSize: 9.5, fill: '#888888' }} 
                             tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}
                           />
                           <Tooltip content={<Custom12MTooltip providerColor={colorHex} />} />
-                          <Bar dataKey="value" radius={[6, 6, 0, 0]} fill={colorHex} isAnimationActive={false}>
+                          <Bar dataKey="value" radius={[5, 5, 0, 0]} fill={colorHex} isAnimationActive={false}>
                             <LabelList 
                               dataKey="kVal" 
                               position="top" 
-                              style={{ fontSize: '9px', fontWeight: 'bold', fill: colorHex }} 
+                              style={{ fontSize: '8.5px', fontWeight: 'bold', fill: colorHex }} 
                             />
                             {modal12mHistory.map((entry, index) => (
                               <Cell 
@@ -2879,7 +2879,7 @@ export default function Dashboard({ contracts, prices, user, onSelectTab }: Dash
             })()}
 
             {/* Modal Footer */}
-            <div className="flex items-center justify-between pt-4 border-t border-zinc-100 dark:border-zinc-800">
+            <div className="flex items-center justify-between pt-3 border-t border-zinc-100 dark:border-zinc-800">
               {modalProvider === 'um-telecom' || modalProvider === 'starlink' || modalProvider === 'vectra' ? (
                 <button
                   onClick={() => {
@@ -2887,7 +2887,7 @@ export default function Dashboard({ contracts, prices, user, onSelectTab }: Dash
                     setModalProvider(null);
                     if (tab) onSelectTab?.(tab);
                   }}
-                  className="flex items-center gap-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-900 px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+                  className="flex items-center gap-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-900 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
                 >
                   <span>Acessar painel detalhado</span>
                   <ArrowRight className="h-3.5 w-3.5" />
@@ -2895,7 +2895,7 @@ export default function Dashboard({ contracts, prices, user, onSelectTab }: Dash
               ) : (
                 <button
                   onClick={() => setModalProvider(null)}
-                  className="flex items-center gap-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-900 px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+                  className="flex items-center gap-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-900 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
                 >
                   <span>Concluído</span>
                   <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
@@ -2903,7 +2903,7 @@ export default function Dashboard({ contracts, prices, user, onSelectTab }: Dash
               )}
               <button
                 onClick={() => setModalProvider(null)}
-                className="px-5 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-700 text-xs font-bold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                className="px-4 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 text-xs font-bold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
               >
                 Fechar
               </button>
