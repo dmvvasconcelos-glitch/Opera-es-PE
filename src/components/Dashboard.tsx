@@ -1889,6 +1889,10 @@ export default function Dashboard({ contracts, prices, user, onSelectTab }: Dash
   // Premium colors specifically tailored to reflect Inter-slate design
   const COLORS = ['#10b981', '#6366f1', '#06b6d4', '#f59e0b', '#3b82f6', '#ec4899', '#8b5cf6', '#14b8a6', '#f43f5e', '#a855f7'];
 
+  // Vibrant, colorful palettes for PVF and General Billing charts
+  const VIBRANT_PVF_COLORS = ['#4f46e5', '#0284c7', '#7c3aed', '#ec4899', '#06b6d4'];
+  const VIBRANT_GENERAL_COLORS = ['#0d9488', '#10b981', '#f59e0b', '#3b82f6', '#8b5cf6'];
+
   return (
     <div className="space-y-8">
       {/* HEADER SECTION WITH MONTH SELECTOR */}
@@ -3096,7 +3100,7 @@ export default function Dashboard({ contracts, prices, user, onSelectTab }: Dash
                 />
                 <Bar dataKey="Faturamento (R$)" fill="#6366f1" radius={[6, 6, 0, 0]} isAnimationActive={false}>
                   {last3MonthsBillingData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[(index + 1) % COLORS.length]} />
+                    <Cell key={`cell-${index}`} fill={VIBRANT_PVF_COLORS[index % VIBRANT_PVF_COLORS.length]} />
                   ))}
                   <LabelList 
                     dataKey="Faturamento (R$)" 
@@ -3208,7 +3212,7 @@ export default function Dashboard({ contracts, prices, user, onSelectTab }: Dash
                 />
                 <Bar dataKey="Faturamento Geral (R$)" fill="#0d9488" radius={[6, 6, 0, 0]} isAnimationActive={false}>
                   {last3MonthsBillingData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[(index + 3) % COLORS.length]} />
+                    <Cell key={`cell-${index}`} fill={VIBRANT_GENERAL_COLORS[index % VIBRANT_GENERAL_COLORS.length]} />
                   ))}
                   <LabelList 
                     dataKey="Faturamento Geral (R$)" 

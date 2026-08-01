@@ -149,8 +149,8 @@ service cloud.firestore {
         'solution',
         'billingValue'
       ])
-      && (!data.keys().hasAll(['sdm']) || data.sdm == null || data.sdm is string)
-      && (!data.keys().hasAll(['relatedOs']) || data.relatedOs == null || data.relatedOs is string)
+      && (!('sdm' in data) || data.sdm == null || data.sdm is string)
+      && (!('relatedOs' in data) || data.relatedOs == null || data.relatedOs is string)
       && data.id is string
       && data.id.size() <= 128
       && data.referenceMonth is string
@@ -164,8 +164,20 @@ service cloud.firestore {
       && data.description is string
       && data.description.size() <= 2000
       && data.solution is string
-      && (data.solution == 'Interior' || data.solution == 'Noronha' || data.solution == 'Ativação PCM')
+      && data.solution.size() <= 100
       && (data.billingValue is float || data.billingValue is int);
+    }
+
+    function isValidStarlinkPrices(data) {
+      return data.keys().hasAll([
+        'costInterior',
+        'costNoronha',
+        'costNovoPCM'
+      ])
+      && (data.costInterior is float || data.costInterior is int)
+      && (data.costNoronha is float || data.costNoronha is int)
+      && (data.costNovoPCM is float || data.costNovoPCM is int)
+      && (!('updatedAt' in data) || data.updatedAt is string);
     }
 
     function isValidVectraRecord(data) {
@@ -330,7 +342,8 @@ service cloud.firestore {
         (docId == 'current' && isValidPrices(incoming())) ||
         (docId == 'contactCenter' && isValidContactCenterPrices(incoming())) ||
         (docId == 'vectra' && isValidVectraPrices(incoming())) ||
-        (docId == 'umtelecom' && isValidUmTelecomPrices(incoming()))
+        (docId == 'umtelecom' && isValidUmTelecomPrices(incoming())) ||
+        (docId == 'starlink' && isValidStarlinkPrices(incoming()))
       );
       allow delete: if isValidId(docId);
     }

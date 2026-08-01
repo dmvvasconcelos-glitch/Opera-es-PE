@@ -359,10 +359,9 @@ export default function App() {
       const isAllowed = isScreenAllowed(activeTab);
       if (!isAllowed) {
         const firstAllowed = ALL_TABS.find(tab => isScreenAllowed(tab));
-        if (firstAllowed) {
-          setActiveTab(firstAllowed);
-        } else {
-          setActiveTab('dashboard');
+        const targetTab = firstAllowed || 'dashboard';
+        if (targetTab !== activeTab) {
+          setActiveTab(targetTab);
         }
       }
     }

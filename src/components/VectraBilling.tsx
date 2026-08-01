@@ -31,7 +31,7 @@ import { jsPDF } from 'jspdf';
 import { db, handleFirestoreError, OperationType, cleanUndefined, onSnapshot, getDoc, setDoc, deleteDoc, writeBatch } from '../firebase';
 import { collection, doc } from 'firebase/firestore';
 import { UserSession } from '../types';
-import { useCurrentMonthFilter, getCurrentMonth, getAvailableMonths } from '../utils/monthUtils';
+import { useCurrentMonthFilter, getCurrentMonth, getAvailableMonths, PORTUGUESE_MONTHS } from '../utils/monthUtils';
 
 interface VectraOS {
   id: string;
@@ -232,6 +232,7 @@ export default function VectraBilling({ user }: { user?: UserSession | null }) {
   // Form states
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [submittingId, setSubmittingId] = useState<string | null>(null);
   const [osToDelete, setOsToDelete] = useState<string | null>(null);
 
   const [formDate, setFormDate] = useState(() => {
@@ -256,27 +257,31 @@ export default function VectraBilling({ user }: { user?: UserSession | null }) {
     }
   }, [referenceMonth, editingId]);
 
-  // Derive real-time duplicate warning for protocol number validation
+  // Derive real-time duplicate warning for protocol number validation within target reference month
   const duplicateWarning = useMemo(() => {
     const cleanInput = formProtocol.trim();
     if (!cleanInput) return null;
     const normalized = cleanInput.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
     const found = records.find(
-      (r) => r.id !== editingId && (r.protocol || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === normalized
+      (r) => r.id !== editingId && 
+             r.id !== submittingId &&
+             r.referenceMonth === formReferenceMonth &&
+             (r.protocol || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === normalized
     );
     if (found) {
       return `Protocolo ${found.protocol} já cadastrado no mês ${found.referenceMonth} (${found.location}).`;
     }
     return null;
-  }, [formProtocol, records, editingId]);
+  }, [formProtocol, formReferenceMonth, records, editingId, submittingId]);
 
-  // Count protocol occurrences across all records for warning badges in tables
+  // Count protocol occurrences per reference month for warning badges in tables
   const protocolCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     records.forEach((r) => {
-      const key = (r.protocol || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-      if (key) {
-        counts[key] = (counts[key] || 0) + 1;
+      const protoKey = (r.protocol || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      if (protoKey) {
+        const fullKey = `${r.referenceMonth}_${protoKey}`;
+        counts[fullKey] = (counts[fullKey] || 0) + 1;
       }
     });
     return counts;
@@ -460,14 +465,17 @@ export default function VectraBilling({ user }: { user?: UserSession | null }) {
       return;
     }
 
-    // Prevenir protocolo duplicado
+    // Prevenir protocolo duplicado no mesmo mês de referência
     const normalizedNew = cleanProtocol.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
     const duplicateRecord = records.find(
-      r => r.id !== editingId && (r.protocol || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === normalizedNew
+      r => r.id !== editingId && 
+           r.id !== submittingId &&
+           r.referenceMonth === formReferenceMonth && 
+           (r.protocol || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === normalizedNew
     );
     if (duplicateRecord) {
       showToast(
-        `Impossível cadastrar: Protocolo ${cleanProtocol} já existe no sistema (${duplicateRecord.referenceMonth} - Local: ${duplicateRecord.location}).`,
+        `Impossível cadastrar: Protocolo ${cleanProtocol} já existe no mês ${formReferenceMonth} (${duplicateRecord.location}).`,
         "error"
       );
       return;
@@ -475,6 +483,7 @@ export default function VectraBilling({ user }: { user?: UserSession | null }) {
 
     if (editingId) {
       // Editing Mode
+      setSubmittingId(editingId);
       const updatedRecord: VectraOS = {
         id: editingId,
         referenceMonth: formReferenceMonth,
@@ -490,11 +499,12 @@ export default function VectraBilling({ user }: { user?: UserSession | null }) {
       setDoc(doc(db, 'vectraRecords', editingId), cleanUndefined(updatedRecord))
         .then(() => {
           showToast("Ordem de serviço atualizada com sucesso!");
-          if (formReferenceMonth && formReferenceMonth !== referenceMonth) {
-            setReferenceMonth(formReferenceMonth);
+          const targetMonth = formReferenceMonth || referenceMonth;
+          if (targetMonth !== referenceMonth) {
+            setReferenceMonth(targetMonth);
           }
           setEditingId(null);
-          resetForm();
+          resetForm(targetMonth);
         })
         .catch((error) => {
           handleFirestoreError(error, OperationType.WRITE, `vectraRecords/${editingId}`);
@@ -502,10 +512,12 @@ export default function VectraBilling({ user }: { user?: UserSession | null }) {
         })
         .finally(() => {
           setIsLoading(false);
+          setSubmittingId(null);
         });
     } else {
       // Creation Mode
       const newId = `vec-${Date.now()}`;
+      setSubmittingId(newId);
       const newOS: VectraOS = {
         id: newId,
         referenceMonth: formReferenceMonth,
@@ -521,10 +533,11 @@ export default function VectraBilling({ user }: { user?: UserSession | null }) {
       setDoc(doc(db, 'vectraRecords', newId), cleanUndefined(newOS))
         .then(() => {
           showToast("Nova ordem de serviço cadastrada com sucesso!");
-          if (formReferenceMonth && formReferenceMonth !== referenceMonth) {
-            setReferenceMonth(formReferenceMonth);
+          const targetMonth = formReferenceMonth || referenceMonth;
+          if (targetMonth !== referenceMonth) {
+            setReferenceMonth(targetMonth);
           }
-          resetForm();
+          resetForm(targetMonth);
         })
         .catch((error) => {
           handleFirestoreError(error, OperationType.WRITE, `vectraRecords/${newId}`);
@@ -532,20 +545,23 @@ export default function VectraBilling({ user }: { user?: UserSession | null }) {
         })
         .finally(() => {
           setIsLoading(false);
+          setSubmittingId(null);
         });
     }
   };
 
-  const resetForm = () => {
+  const resetForm = (overrideMonth?: string) => {
+    const activeRefMonth = overrideMonth || referenceMonth;
     setFormProtocol('');
     setFormSdm('');
     setFormLocation('');
     setFormDescription('');
     setFormSolution('');
     setFormCategory('wifi');
-    setFormReferenceMonth(referenceMonth);
+    setFormReferenceMonth(activeRefMonth);
     setShowForm(false);
     setEditingId(null);
+    setSubmittingId(null);
   };
 
   const startEdit = (os: VectraOS) => {
@@ -1382,8 +1398,8 @@ export default function VectraBilling({ user }: { user?: UserSession | null }) {
                       <td className="py-3 px-2 font-mono text-xs font-bold text-zinc-400">
                         <div className="flex items-center gap-1.5">
                           <span>{item.protocol}</span>
-                          {protocolCounts[(item.protocol || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase()] > 1 && (
-                            <span className="inline-flex items-center gap-1 text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded-md font-mono" title="Este protocolo aparece mais de uma vez no sistema!">
+                          {protocolCounts[`${item.referenceMonth}_${(item.protocol || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`] > 1 && (
+                            <span className="inline-flex items-center gap-1 text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded-md font-mono" title="Este protocolo aparece mais de uma vez no mesmo mês de referência!">
                               <AlertTriangle className="h-3 w-3 text-rose-500 shrink-0" />
                               <span>DUPLICADO</span>
                             </span>

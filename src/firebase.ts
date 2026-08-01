@@ -112,22 +112,30 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
-export function cleanUndefined<T>(obj: T): T {
+export function cleanUndefined<T>(obj: T, seen = new WeakSet()): T {
   if (obj === null || obj === undefined) return obj;
+  if (typeof obj !== 'object') return obj;
+  if (obj instanceof Date) return obj;
+  
+  if (seen.has(obj as object)) return obj;
+  seen.add(obj as object);
+
   if (Array.isArray(obj)) {
-    return obj.map(cleanUndefined) as unknown as T;
+    return obj.map(item => cleanUndefined(item, seen)) as unknown as T;
   }
-  if (typeof obj === 'object') {
-    const cleaned: any = {};
-    for (const key of Object.keys(obj as any)) {
-      const val = (obj as any)[key];
-      if (val !== undefined) {
-        cleaned[key] = cleanUndefined(val);
-      }
+
+  const isPlainObject = Object.prototype.toString.call(obj) === '[object Object]' &&
+                        (!obj.constructor || obj.constructor.name === 'Object');
+  if (!isPlainObject) return obj;
+
+  const cleaned: any = {};
+  for (const key of Object.keys(obj as any)) {
+    const val = (obj as any)[key];
+    if (val !== undefined) {
+      cleaned[key] = cleanUndefined(val, seen);
     }
-    return cleaned as T;
   }
-  return obj;
+  return cleaned as T;
 }
 
 import { doc, getDocFromServer, onSnapshot as firestoreOnSnapshot, getDocs as firestoreGetDocs, getDoc as firestoreGetDoc, setDoc as firestoreSetDoc, deleteDoc as firestoreDeleteDoc, addDoc as firestoreAddDoc, updateDoc as firestoreUpdateDoc, writeBatch as firestoreWriteBatch, Query, DocumentReference, FirestoreError } from 'firebase/firestore';

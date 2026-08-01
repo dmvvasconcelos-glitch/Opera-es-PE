@@ -28,7 +28,7 @@ import { jsPDF } from 'jspdf';
 import { db, handleFirestoreError, OperationType, cleanUndefined, onSnapshot, getDoc, setDoc, deleteDoc, writeBatch } from '../firebase';
 import { collection, doc } from 'firebase/firestore';
 import { UserSession } from '../types';
-import { useCurrentMonthFilter, getCurrentMonth, getAvailableMonths } from '../utils/monthUtils';
+import { useCurrentMonthFilter, getCurrentMonth, getAvailableMonths, PORTUGUESE_MONTHS } from '../utils/monthUtils';
 
 interface UmTelecomRecord {
   id: string;
@@ -165,30 +165,50 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
   const [formSolution, setFormSolution] = useState('');
   const [formReferenceMonth, setFormReferenceMonth] = useState(getCurrentMonth);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
+  const [submittingRecordId, setSubmittingRecordId] = useState<string | null>(null);
   const [deleteRecordId, setDeleteRecordId] = useState<string | null>(null);
   const [isSavingRecord, setIsSavingRecord] = useState(false);
 
-  // Derive real-time duplicate warning for protocol number validation
+  // Auto-sync formReferenceMonth when formDate changes
+  useEffect(() => {
+    if (formDate && !editingRecordId) {
+      const parts = formDate.split('-');
+      if (parts.length === 3) {
+        const year = parts[0];
+        const monthIdx = parseInt(parts[1], 10) - 1;
+        if (monthIdx >= 0 && monthIdx < PORTUGUESE_MONTHS.length) {
+          const derived = `${PORTUGUESE_MONTHS[monthIdx]}/${year}`;
+          setFormReferenceMonth(derived);
+        }
+      }
+    }
+  }, [formDate, editingRecordId]);
+
+  // Derive real-time duplicate warning for protocol number validation within target reference month
   const duplicateWarning = useMemo(() => {
     const cleanInput = formOsNumber.trim();
     if (!cleanInput) return null;
     const normalized = cleanInput.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
     const found = dbRecords.find(
-      (r) => r.id !== editingRecordId && (r.osNumber || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === normalized
+      (r) => r.id !== editingRecordId && 
+             r.id !== submittingRecordId &&
+             r.referenceMonth === formReferenceMonth &&
+             (r.osNumber || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === normalized
     );
     if (found) {
       return `Protocolo ${found.osNumber} já cadastrado no mês ${found.referenceMonth} (${found.location}).`;
     }
     return null;
-  }, [formOsNumber, dbRecords, editingRecordId]);
+  }, [formOsNumber, formReferenceMonth, dbRecords, editingRecordId, submittingRecordId]);
 
-  // Count protocol occurrences across all dbRecords for warning badges in tables
+  // Count protocol occurrences per reference month for warning badges in tables
   const protocolCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     dbRecords.forEach((r) => {
       const key = (r.osNumber || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
       if (key) {
-        counts[key] = (counts[key] || 0) + 1;
+        const fullKey = `${r.referenceMonth}_${key}`;
+        counts[fullKey] = (counts[fullKey] || 0) + 1;
       }
     });
     return counts;
@@ -869,7 +889,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
     // Check for duplicate protocol/OS number (preventing duplicate OS in system regardless of month or category)
     const normalizedNew = cleanOsNumber.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
     const duplicateRecord = dbRecords.find(
-      r => r.id !== editingRecordId && (r.osNumber || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === normalizedNew
+      r => r.id !== editingRecordId && r.id !== submittingRecordId && (r.osNumber || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === normalizedNew
     );
     if (duplicateRecord) {
       showToast(
@@ -887,6 +907,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
     const cleanSolution = formSolution.trim();
 
     const uniqueId = editingRecordId || `um-telecom-${Date.now()}`;
+    setSubmittingRecordId(uniqueId);
     const newRecord: UmTelecomRecord = {
       id: uniqueId,
       referenceMonth: formReferenceMonth,
@@ -965,6 +986,7 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
       handleFirestoreError(err, OperationType.WRITE, `umTelecomRecords/${uniqueId}`);
     } finally {
       setIsSavingRecord(false);
+      setSubmittingRecordId(null);
     }
   };
 
@@ -1832,8 +1854,8 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                             <td className="p-4 font-bold text-zinc-900 dark:text-white font-mono whitespace-nowrap">
                               <div className="flex items-center gap-1.5">
                                 <span>{record.osNumber}</span>
-                                {protocolCounts[(record.osNumber || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase()] > 1 && (
-                                  <span className="inline-flex items-center gap-1 text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded-md font-mono" title="Este protocolo aparece mais de uma vez no sistema!">
+                                {protocolCounts[`${record.referenceMonth}_${(record.osNumber || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`] > 1 && (
+                                  <span className="inline-flex items-center gap-1 text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded-md font-mono" title="Este protocolo aparece mais de uma vez no mesmo mês de referência!">
                                     <AlertTriangle className="h-3 w-3 text-rose-500 shrink-0" />
                                     <span>DUPLICADO</span>
                                   </span>
@@ -1911,8 +1933,8 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                             <td className="p-4 font-bold text-zinc-900 dark:text-white font-mono whitespace-nowrap">
                               <div className="flex items-center gap-1.5">
                                 <span>{record.osNumber}</span>
-                                {protocolCounts[(record.osNumber || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase()] > 1 && (
-                                  <span className="inline-flex items-center gap-1 text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded-md font-mono" title="Este protocolo aparece mais de uma vez no sistema!">
+                                {protocolCounts[`${record.referenceMonth}_${(record.osNumber || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`] > 1 && (
+                                  <span className="inline-flex items-center gap-1 text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded-md font-mono" title="Este protocolo aparece mais de uma vez no mesmo mês de referência!">
                                     <AlertTriangle className="h-3 w-3 text-rose-500 shrink-0" />
                                     <span>DUPLICADO</span>
                                   </span>
@@ -2038,8 +2060,8 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                           <td className="p-4 font-bold text-zinc-900 dark:text-white font-mono whitespace-nowrap">
                             <div className="flex items-center gap-1.5">
                               <span>{record.osNumber}</span>
-                              {protocolCounts[(record.osNumber || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase()] > 1 && (
-                                <span className="inline-flex items-center gap-1 text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded-md font-mono" title="Este protocolo aparece mais de uma vez no sistema!">
+                              {protocolCounts[`${record.referenceMonth}_${(record.osNumber || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`] > 1 && (
+                                <span className="inline-flex items-center gap-1 text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded-md font-mono" title="Este protocolo aparece mais de uma vez no mesmo mês de referência!">
                                   <AlertTriangle className="h-3 w-3 text-rose-500 shrink-0" />
                                   <span>DUPLICADO</span>
                                 </span>
@@ -2141,8 +2163,8 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
                           <td className="p-4 font-bold text-zinc-900 dark:text-white font-mono whitespace-nowrap">
                             <div className="flex items-center gap-1.5">
                               <span>{record.osNumber}</span>
-                              {protocolCounts[(record.osNumber || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase()] > 1 && (
-                                <span className="inline-flex items-center gap-1 text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded-md font-mono" title="Este protocolo aparece mais de uma vez no sistema!">
+                              {protocolCounts[`${record.referenceMonth}_${(record.osNumber || '').trim().replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`] > 1 && (
+                                <span className="inline-flex items-center gap-1 text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded-md font-mono" title="Este protocolo aparece mais de uma vez no mesmo mês de referência!">
                                   <AlertTriangle className="h-3 w-3 text-rose-500 shrink-0" />
                                   <span>DUPLICADO</span>
                                 </span>
