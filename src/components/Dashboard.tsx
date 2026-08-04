@@ -521,7 +521,7 @@ export default function Dashboard({ contracts, prices, user, onSelectTab }: Dash
         const isVectraSeeded = typeof window !== 'undefined' && localStorage.getItem('vectra_seeded_v1') === 'true';
         const records = (dbVectraRecords.length > 0 || isVectraSeeded) ? dbVectraRecords : generateMockVectraRecords();
         const monthRecords = records.filter((r: any) => r.referenceMonth === refMonth);
-        const totalCount = monthRecords.length > 0 ? monthRecords.length : 80;
+        const totalCount = monthRecords.length;
 
         const limitCombined = Number(vectraPrices.limitWifi ?? 60);
         const baseCostCombined = Number(vectraPrices.baseCostWifi ?? 39400.20);
