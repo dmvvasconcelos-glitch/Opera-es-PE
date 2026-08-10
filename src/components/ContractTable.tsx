@@ -6,7 +6,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { jsPDF } from 'jspdf';
 import { Contract, PvfPrices, PvfKey, UserSession } from '../types';
-import { PVF_LABELS, getContractPvfTotal, getContractValue, formatCurrency } from '../data';
+import { PVF_LABELS, INITIAL_PRICES, getContractPvfTotal, getContractValue, formatCurrency } from '../data';
 import { db, handleFirestoreError, OperationType, onSnapshot, getDocs } from '../firebase';
 import { collection, doc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { 
@@ -87,6 +87,12 @@ export default function ContractTable({
   // Editing Unit Price Inline
   const [isEditingPrices, setIsEditingPrices] = useState(false);
   const [tempPrices, setTempPrices] = useState<PvfPrices>({ ...prices });
+
+  useEffect(() => {
+    if (!isEditingPrices) {
+      setTempPrices({ ...prices });
+    }
+  }, [prices, isEditingPrices]);
 
   // Creation/Edit Modal States
   const [showFormModal, setShowFormModal] = useState(false);
@@ -563,6 +569,13 @@ export default function ContractTable({
   const handleCancelPrices = () => {
     setTempPrices({ ...prices });
     setIsEditingPrices(false);
+  };
+
+  const handleResetDefaultPrices = () => {
+    setTempPrices({ ...INITIAL_PRICES });
+    onUpdatePrices(INITIAL_PRICES);
+    setIsEditingPrices(false);
+    showNotification('Tarifas redefinidas para os valores padrão do sistema!');
   };
 
   const handlePriceChange = (key: PvfKey, valStr: string) => {
@@ -1773,6 +1786,14 @@ export default function ContractTable({
                           <span>Salvar</span>
                         </button>
                         <button
+                          onClick={handleResetDefaultPrices}
+                          title="Restaurar Valores Padrão"
+                          className="p-0.5 px-1.5 bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-medium rounded shadow-sm flex items-center gap-0.5"
+                        >
+                          <RotateCcw className="h-2.5 w-2.5" />
+                          <span>Padrão</span>
+                        </button>
+                        <button
                           onClick={handleCancelPrices}
                           title="Cancelar"
                           className="p-0.5 px-1.5 bg-zinc-400 hover:bg-zinc-500 text-white text-[10px] font-medium rounded"
@@ -2066,12 +2087,21 @@ export default function ContractTable({
                     );
                   })}
                 </div>
-                <button
-                  onClick={handleSavePrices}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs py-2 rounded-lg"
-                >
-                  Salvar Novas Tarifas
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleSavePrices}
+                    className="flex-1 bg-sky-600 hover:bg-sky-700 text-white font-semibold text-xs py-2 rounded-lg"
+                  >
+                    Salvar Novas Tarifas
+                  </button>
+                  <button
+                    onClick={handleResetDefaultPrices}
+                    className="bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs px-3 py-2 rounded-lg flex items-center gap-1"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                    <span>Restaurar Padrão</span>
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 font-mono text-xs text-center text-zinc-700 dark:text-sky-305">

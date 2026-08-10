@@ -1452,6 +1452,17 @@ export default function Dashboard({ contracts, prices, user, onSelectTab }: Dash
     return totalTableBilling + umTelecomStats.grandTotal + starlinkStats.grandTotal + vectraStats.grandTotal + totalCcBilling;
   }, [totalTableBilling, umTelecomStats, starlinkStats, vectraStats, totalCcBilling]);
 
+  const sortedShares = useMemo(() => {
+    const items = [
+      { id: 'pvf', name: 'PVF (Fixo)', value: totalTableBilling, color: 'bg-emerald-500', barTitle: 'PVF Fixo' },
+      { id: 'um', name: 'Um Telecom', value: umTelecomStats.grandTotal, color: 'bg-[#1275B8]', barTitle: 'Um Telecom' },
+      { id: 'starlink', name: 'Starlink', value: starlinkStats.grandTotal, color: 'bg-amber-500', barTitle: 'Starlink UT' },
+      { id: 'vectra', name: 'Vectra', value: vectraStats.grandTotal, color: 'bg-[#B6202F]', barTitle: 'Vectra' },
+      { id: 'cc', name: 'Contact Center', value: totalCcBilling, color: 'bg-violet-500', barTitle: 'Contact Center' },
+    ];
+    return items.sort((a, b) => b.value - a.value);
+  }, [totalTableBilling, umTelecomStats.grandTotal, starlinkStats.grandTotal, vectraStats.grandTotal, totalCcBilling]);
+
   // Faturamento total mês a mês, combinando histórico e os últimos 3 meses
   const monthlyBillingData = useMemo(() => {
     const MONTH_MAP: Record<string, number> = {
@@ -1959,44 +1970,20 @@ export default function Dashboard({ contracts, prices, user, onSelectTab }: Dash
                 </p>
               </div>
 
-              <div className="bg-zinc-900/65 dark:bg-zinc-950/65 rounded-2xl p-4 border border-zinc-800/80 shrink-0 min-w-[245px] flex flex-col justify-center">
+              <div className="bg-zinc-900/65 dark:bg-zinc-950/65 rounded-2xl p-4 border border-zinc-800/80 shrink-0 min-w-[280px] sm:min-w-[310px] flex flex-col justify-center">
                 <span className="text-[9px] text-zinc-500 font-extrabold uppercase tracking-widest font-mono">Fatias de Participação</span>
                 <div className="space-y-1.5 mt-2.5">
-                  <div className="flex items-center justify-between text-[11px] font-mono">
-                    <span className="flex items-center gap-1.5 text-zinc-400">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-                      PVF (Fixo):
-                    </span>
-                    <span className="font-bold text-white">{(totalTableBilling / (grandTotalAll || 1) * 100).toFixed(1)}%</span>
-                  </div>
-                  <div className="flex items-center justify-between text-[11px] font-mono">
-                    <span className="flex items-center gap-1.5 text-zinc-400">
-                      <span className="w-2 h-2 rounded-full bg-[#1275B8] shrink-0" />
-                      Um Telecom:
-                    </span>
-                    <span className="font-bold text-white">{(umTelecomStats.grandTotal / (grandTotalAll || 1) * 100).toFixed(1)}%</span>
-                  </div>
-                  <div className="flex items-center justify-between text-[11px] font-mono">
-                    <span className="flex items-center gap-1.5 text-zinc-400">
-                      <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
-                      Starlink:
-                    </span>
-                    <span className="font-bold text-white">{(starlinkStats.grandTotal / (grandTotalAll || 1) * 100).toFixed(1)}%</span>
-                  </div>
-                  <div className="flex items-center justify-between text-[11px] font-mono">
-                    <span className="flex items-center gap-1.5 text-zinc-400">
-                      <span className="w-2 h-2 rounded-full bg-[#B6202F] shrink-0" />
-                      Vectra:
-                    </span>
-                    <span className="font-bold text-white">{(vectraStats.grandTotal / (grandTotalAll || 1) * 100).toFixed(1)}%</span>
-                  </div>
-                  <div className="flex items-center justify-between text-[11px] font-mono">
-                    <span className="flex items-center gap-1.5 text-zinc-400">
-                      <span className="w-2 h-2 rounded-full bg-violet-500 shrink-0" />
-                      Contact Center:
-                    </span>
-                    <span className="font-bold text-white">{(totalCcBilling / (grandTotalAll || 1) * 100).toFixed(1)}%</span>
-                  </div>
+                  {sortedShares.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between text-[11px] font-mono gap-2">
+                      <span className="flex items-center gap-1.5 text-zinc-400 shrink-0">
+                        <span className={`w-2 h-2 rounded-full ${item.color} shrink-0`} />
+                        {item.name}:
+                      </span>
+                      <span className="font-bold text-white text-right">
+                        {(item.value / (grandTotalAll || 1) * 100).toFixed(1)}% <span className="text-zinc-400 font-normal text-[10px] ml-1">(R$ {item.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</span>
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -2005,11 +1992,14 @@ export default function Dashboard({ contracts, prices, user, onSelectTab }: Dash
           {/* Visual Percent Bar Chart */}
           <div className="mt-6 w-full relative z-10 border-t border-white/5 pt-4">
             <div className="w-full bg-zinc-800 h-3 rounded-full flex overflow-hidden shadow-inner border border-zinc-800">
-              <div style={{ width: `${(totalTableBilling / (grandTotalAll || 1)) * 100}%` }} className="bg-emerald-500 h-full transition-all duration-500 hover:opacity-90" title={`PVF Fixo: ${(totalTableBilling / (grandTotalAll || 1) * 100).toFixed(1)}%`} />
-              <div style={{ width: `${(umTelecomStats.grandTotal / (grandTotalAll || 1)) * 100}%` }} className="bg-[#1275B8] h-full transition-all duration-500 hover:opacity-90" title={`Um Telecom: ${(umTelecomStats.grandTotal / (grandTotalAll || 1) * 100).toFixed(1)}%`} />
-              <div style={{ width: `${(starlinkStats.grandTotal / (grandTotalAll || 1)) * 100}%` }} className="bg-amber-500 h-full transition-all duration-500 hover:opacity-90" title={`Starlink UT: ${(starlinkStats.grandTotal / (grandTotalAll || 1) * 100).toFixed(1)}%`} />
-              <div style={{ width: `${(vectraStats.grandTotal / (grandTotalAll || 1)) * 100}%` }} className="bg-[#B6202F] h-full transition-all duration-500 hover:opacity-90" title={`Vectra: ${(vectraStats.grandTotal / (grandTotalAll || 1) * 100).toFixed(1)}%`} />
-              <div style={{ width: `${(totalCcBilling / (grandTotalAll || 1)) * 100}%` }} className="bg-violet-500 h-full transition-all duration-500 hover:opacity-90" title={`Contact Center: ${(totalCcBilling / (grandTotalAll || 1) * 100).toFixed(1)}%`} />
+              {sortedShares.map((item) => (
+                <div
+                  key={`bar-${item.id}`}
+                  style={{ width: `${(item.value / (grandTotalAll || 1)) * 100}%` }}
+                  className={`${item.color} h-full transition-all duration-500 hover:opacity-90`}
+                  title={`${item.barTitle}: ${(item.value / (grandTotalAll || 1) * 100).toFixed(1)}% (R$ ${item.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`}
+                />
+              ))}
             </div>
           </div>
         </div>

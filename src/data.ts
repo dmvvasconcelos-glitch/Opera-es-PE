@@ -19,16 +19,16 @@ export const PVF_LABELS: Record<PvfKey, string> = {
 };
 
 export const INITIAL_PRICES: PvfPrices = {
-  analogico: 15.0,
-  semFio: 25.0,
-  extensao: 10.0,
-  dBasico: 20.0,
-  dEspecial: 35.0,
-  ipBasico: 30.0,
-  fCabeca: 50.0,
-  sMesa: 45.0,
-  software: 12.0,
-  virtual: 18.0,
+  analogico: 26.60,
+  semFio: 29.26,
+  extensao: 31.92,
+  dBasico: 44.24,
+  dEspecial: 56.04,
+  ipBasico: 40.29,
+  fCabeca: 25.18,
+  sMesa: 78.29,
+  software: 21.75,
+  virtual: 2.80,
 };
 
 export const INITIAL_CONTRACTS: Contract[] = [
