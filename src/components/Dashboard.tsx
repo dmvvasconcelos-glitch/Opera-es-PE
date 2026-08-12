@@ -1958,7 +1958,7 @@ export default function Dashboard({ contracts, prices, user, onSelectTab }: Dash
               </div>
             </div>
             
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
               <div className="space-y-2">
                 <h1 className="text-2xl sm:text-3.5xl font-black font-sans leading-none tracking-tight flex items-baseline gap-1.5">
                   <span className="text-lg sm:text-xl font-normal text-zinc-400">R$</span>
@@ -1970,20 +1970,28 @@ export default function Dashboard({ contracts, prices, user, onSelectTab }: Dash
                 </p>
               </div>
 
-              <div className="bg-zinc-900/65 dark:bg-zinc-950/65 rounded-2xl p-4 border border-zinc-800/80 shrink-0 min-w-[280px] sm:min-w-[310px] flex flex-col justify-center">
-                <span className="text-[9px] text-zinc-500 font-extrabold uppercase tracking-widest font-mono">Fatias de Participação</span>
-                <div className="space-y-1.5 mt-2.5">
-                  {sortedShares.map((item) => (
-                    <div key={item.id} className="flex items-center justify-between text-[11px] font-mono gap-2">
-                      <span className="flex items-center gap-1.5 text-zinc-400 shrink-0">
-                        <span className={`w-2 h-2 rounded-full ${item.color} shrink-0`} />
-                        {item.name}:
-                      </span>
-                      <span className="font-bold text-white text-right">
-                        {(item.value / (grandTotalAll || 1) * 100).toFixed(1)}% <span className="text-zinc-400 font-normal text-[10px] ml-1">(R$ {item.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</span>
-                      </span>
-                    </div>
-                  ))}
+              <div className="bg-zinc-900/70 dark:bg-zinc-950/70 rounded-2xl p-3.5 sm:p-4 border border-zinc-800/80 w-full lg:w-auto shrink-0 min-w-0 flex flex-col justify-center">
+                <div className="flex items-center justify-between pb-1.5 border-b border-white/10 mb-2 gap-2">
+                  <span className="text-[9px] text-zinc-400 font-extrabold uppercase tracking-widest font-mono">Fatias de Participação</span>
+                  <span className="text-[9px] text-zinc-500 font-mono font-semibold">Valor Total</span>
+                </div>
+                <div className="space-y-1.5">
+                  {sortedShares.map((item) => {
+                    const pct = (item.value / (grandTotalAll || 1) * 100).toFixed(1);
+                    const formattedVal = item.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    return (
+                      <div key={item.id} className="flex items-center justify-between text-[11px] font-mono gap-3">
+                        <span className="flex items-center gap-1.5 text-zinc-300 shrink-0 font-medium">
+                          <span className={`w-2 h-2 rounded-full ${item.color} shrink-0`} />
+                          <span className="truncate max-w-[120px] sm:max-w-none">{item.name}:</span>
+                        </span>
+                        <div className="flex items-center gap-1.5 text-right shrink-0">
+                          <span className="font-bold text-white text-[11px]">{pct}%</span>
+                          <span className="text-zinc-400 font-normal text-[10px]">(R$ {formattedVal})</span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
