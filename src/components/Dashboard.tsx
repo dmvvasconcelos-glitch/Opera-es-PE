@@ -2330,8 +2330,11 @@ export default function Dashboard({ contracts, prices, user, onSelectTab }: Dash
               <div className="text-2xl font-black text-zinc-900 dark:text-zinc-50 font-mono">
                 {totalCcLicenses} <span className="text-sm font-medium text-zinc-400">ativos</span>
               </div>
-              <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-semibold bg-zinc-55 text-nowrap dark:bg-zinc-800 px-2 py-0.5 rounded-md inline-block border border-zinc-205 dark:border-zinc-800">
-                NMS, Gravação e URA ativos
+              <span 
+                className="text-[10px] text-zinc-500 dark:text-zinc-400 font-semibold bg-zinc-55 text-nowrap dark:bg-zinc-800 px-2 py-0.5 rounded-md inline-block border border-zinc-205 dark:border-zinc-800 cursor-help"
+                title="Unidade Central de Distribuição Automática de Chamadas"
+              >
+                UCDA, Gravação e URA ativos
               </span>
             </div>
             <div className="p-3 bg-violet-50 dark:bg-violet-950/50 text-violet-600 dark:text-violet-400 rounded-xl group-hover:scale-105 transition-transform border border-violet-100/40 dark:border-violet-500/20">

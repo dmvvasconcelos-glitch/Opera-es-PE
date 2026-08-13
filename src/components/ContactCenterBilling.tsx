@@ -547,6 +547,18 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
     setIsEditingPrices(false);
   };
 
+  const handleResetDefaultPrices = async () => {
+    try {
+      await setDoc(doc(db, 'systemPrices', 'contactCenter'), DEFAULT_CC_PRICES);
+      setTempPrices({ ...DEFAULT_CC_PRICES });
+      setPrices({ ...DEFAULT_CC_PRICES });
+      setIsEditingPrices(false);
+      showToast('Tarifas de Contact Center redefinidas para os valores padrão do sistema!');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'systemPrices/contactCenter');
+    }
+  };
+
   const handlePriceChange = (key: keyof ContactCenterPrices, value: string) => {
     const numeric = parseFloat(value) || 0;
     setTempPrices(prev => ({ ...prev, [key]: numeric }));
@@ -749,14 +761,14 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
         ['Indicador', 'Valor / Quantidade'],
         ['Contratos Cadastrados (Mes)', stats.totalContracts],
         ['Órgãos Unificados Atendidos', stats.uniqueSecretarias],
-        ['Total Linhas / Canais NMS', stats.totalNms],
+        ['Total Linhas / Canais UCDA', stats.totalNms],
         ['Total Canais Gravação Digital', stats.totalGravacao],
-        ['Total Portas URA NMS', stats.totalUra],
+        ['Total Portas URA', stats.totalUra],
         ['FATURAMENTO COMPLETO ESTIMADO', formatBRL(stats.grandTotalValue)],
         [''],
-        ['TARIFAS UNITÁRIAS VIGENTES'],
+        ['TARIFAS VIGENTES'],
         ['Serviço', 'Básico', 'Crítico'],
-        ['Unidade Central CAC (NMS)', formatBRL(prices.nmsBasico), formatBRL(prices.nmsCritico)],
+        ['Unidade Central UCDA', formatBRL(prices.nmsBasico), formatBRL(prices.nmsCritico)],
         ['Gravação Digital', formatBRL(prices.gravacaoBasica), formatBRL(prices.gravacaoCritica)],
         ['U.R.A. (Resposta Audível)', formatBRL(prices.uraBasica), formatBRL(prices.uraCritica)]
       ];
@@ -826,9 +838,9 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
             'CONTRATO': contractStr,
             'SECRETARIA': r.secretaria,
             'STATUS': statusStr,
-            'NMS BÁSICO': nmsBasicoStr,
-            'NMS CRÍTICO': nmsCriticoStr,
-            'VALOR NMS': formatBRL(getRecordNmsValue(r, prices)),
+            'UCDA BÁSICO': nmsBasicoStr,
+            'UCDA CRÍTICO': nmsCriticoStr,
+            'VALOR UCDA': formatBRL(getRecordNmsValue(r, prices)),
             'GRAVAÇÃO BÁSICO': gravBasicaStr,
             'GRAVAÇÃO CRÍTICO': gravCriticaStr,
             'VALOR GRAVAÇÃO': formatBRL(getRecordGravacaoValue(r, prices)),
@@ -905,7 +917,7 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
       doc.setTextColor(71, 85, 105);
       doc.text(`Total de Contratos: ${stats.totalContracts} cadastrados`, 22, y + 18);
       doc.text(`Órgãos Atendidos: ${stats.uniqueSecretarias} secretarias`, 22, y + 23);
-      doc.text(`Total Canais NMS: ${stats.totalNms} ativos`, 22, y + 28);
+      doc.text(`Total Canais UCDA: ${stats.totalNms} ativos`, 22, y + 28);
 
       doc.text(`Registo Canais Gravação: ${stats.totalGravacao} licenças`, 110, y + 18);
       doc.text(`Portas de URA Faturamento: ${stats.totalUra} canais`, 110, y + 23);
@@ -928,9 +940,9 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
       doc.text("CONTRATO", 17, y + 5);
       doc.text("SECRETARIA", 42, y + 5);
       doc.text("STATUS", 102, y + 5);
-      doc.text("NMS BAS", 122, y + 5);
-      doc.text("NMS CRI", 137, y + 5);
-      doc.text("VAL NMS", 152, y + 5);
+      doc.text("UCDA BAS", 122, y + 5);
+      doc.text("UCDA CRI", 137, y + 5);
+      doc.text("VAL UCDA", 152, y + 5);
       doc.text("GRA BAS", 172, y + 5);
       doc.text("GRA CRI", 187, y + 5);
       doc.text("VAL GRA", 202, y + 5);
@@ -1179,7 +1191,7 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
               Faturamento Contact Center
             </h1>
             <p className="text-zinc-500 dark:text-zinc-400 text-sm max-w-2xl leading-relaxed">
-              Módulo unificado para controle de ramais inteligentes, serviços de distribuição de chamadas (NMS), Gravação Digital e URA.
+              Módulo unificado para controle de ramais inteligentes, serviços de distribuição de chamadas (UCDA), Gravação Digital e URA.
             </p>
           </div>
           
@@ -1222,7 +1234,7 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
       </div>
 
       {/* DASHBOARD CARD INDICATORS */}
-      <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         {/* Card 1: Total Contratos */}
         <div className="bg-white dark:bg-zinc-900 rounded-2.5xl border border-zinc-200 dark:border-zinc-805 p-4.5 space-y-1 shadow-xs hover:shadow-md transition-all duration-200">
           <span className="block text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Total de Contratos</span>
@@ -1234,26 +1246,23 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
           </span>
         </div>
 
-        {/* Card 2: Total Secretarias */}
-        <div className="bg-white dark:bg-zinc-900 rounded-2.5xl border border-zinc-200 dark:border-zinc-805 p-4.5 space-y-1 shadow-xs hover:shadow-md transition-all duration-200">
-          <span className="block text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Total de Secretarias</span>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-xl sm:text-2xl font-black tracking-tight text-zinc-800 dark:text-zinc-100">{isZeroMonthSelected ? 0 : stats.uniqueSecretarias}</span>
-          </div>
-          <span className="block text-[9px] text-zinc-400 font-medium font-mono">Órgãos Cadastrados</span>
-        </div>
-
-        {/* Card 3: Total NMS */}
-        <div className="bg-white dark:bg-zinc-900 rounded-2.5xl border border-zinc-200 dark:border-zinc-805 p-4.5 space-y-1 shadow-xs hover:shadow-md transition-all duration-200">
-          <span className="block text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Total NMS</span>
+        {/* Card 2: Total UCDA */}
+        <div 
+          className="bg-white dark:bg-zinc-900 rounded-2.5xl border border-zinc-200 dark:border-zinc-805 p-4.5 space-y-1 shadow-xs hover:shadow-md transition-all duration-200"
+          title="Unidade Central de Distribuição Automática de Chamadas"
+        >
+          <span className="block text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Total UCDA</span>
           <div className="flex items-baseline gap-1.5">
             <span className="text-xl sm:text-2xl font-black tracking-tight text-zinc-800 dark:text-zinc-100">{isZeroMonthSelected ? 0 : stats.totalNms}</span>
           </div>
-          <span className="block text-[9px] text-zinc-450 font-medium font-mono">Central NMS</span>
+          <span className="block text-[9px] text-zinc-450 font-medium font-mono">Central UCDA</span>
         </div>
 
-        {/* Card 4: Total Gravação */}
-        <div className="bg-white dark:bg-zinc-900 rounded-2.5xl border border-zinc-200 dark:border-zinc-805 p-4.5 space-y-1 shadow-xs hover:shadow-md transition-all duration-200">
+        {/* Card 3: Total Gravação */}
+        <div 
+          className="bg-white dark:bg-zinc-900 rounded-2.5xl border border-zinc-200 dark:border-zinc-805 p-4.5 space-y-1 shadow-xs hover:shadow-md transition-all duration-200"
+          title="Gravação Digital de Chamadas"
+        >
           <span className="block text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Total Gravação</span>
           <div className="flex items-baseline gap-1.5">
             <span className="text-xl sm:text-2xl font-black tracking-tight text-zinc-800 dark:text-zinc-100">{isZeroMonthSelected ? 0 : stats.totalGravacao}</span>
@@ -1261,8 +1270,11 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
           <span className="block text-[9px] text-zinc-450 font-medium font-mono">Licenças Digitais</span>
         </div>
 
-        {/* Card 5: Total URA */}
-        <div className="bg-white dark:bg-zinc-900 rounded-2.5xl border border-zinc-200 dark:border-zinc-805 p-4.5 space-y-1 shadow-xs hover:shadow-md transition-all duration-200">
+        {/* Card 4: Total URA */}
+        <div 
+          className="bg-white dark:bg-zinc-900 rounded-2.5xl border border-zinc-200 dark:border-zinc-805 p-4.5 space-y-1 shadow-xs hover:shadow-md transition-all duration-200"
+          title="Unidade de Resposta Audível"
+        >
           <span className="block text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono">Total URA</span>
           <div className="flex items-baseline gap-1.5">
             <span className="text-xl sm:text-2xl font-black tracking-tight text-zinc-800 dark:text-zinc-100">{isZeroMonthSelected ? 0 : stats.totalUra}</span>
@@ -1270,8 +1282,8 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
           <span className="block text-[9px] text-zinc-450 font-medium font-mono">Resposta Audível</span>
         </div>
 
-        {/* Card 6: Valor Mensal Total (Destaque) */}
-        <div className="col-span-2 lg:col-span-1 bg-brand text-white dark:bg-zinc-900 dark:border-brand/40 border dark:border rounded-2xl p-4 flex flex-col justify-center shadow-md shadow-brand/10 hover:shadow-2xl transition-all duration-200">
+        {/* Card 5: Valor Mensal Total (Destaque) */}
+        <div className="col-span-2 md:col-span-1 lg:col-span-1 bg-brand text-white dark:bg-zinc-900 dark:border-brand/40 border dark:border rounded-2xl p-4 flex flex-col justify-center shadow-md shadow-brand/10 hover:shadow-2xl transition-all duration-200">
           <span className="block text-[10px] text-cyan-100 dark:text-brand font-black uppercase tracking-wider font-mono">Valor Mensal Total</span>
           <span className="text-xl sm:text-2xl font-black tracking-tight leading-none truncate block mt-1">
             {formatBRL(stats.grandTotalValue)}
@@ -1348,30 +1360,81 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
 
       {/* DETAILED DATA TABLE */}
       <div className="bg-white dark:bg-zinc-900 rounded-3xl shadow-sm border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="table-scrollbar-fluid">
           <table className="w-full border-collapse text-left text-sm whitespace-nowrap">
             
             {/* Header Columns */}
             <thead className="bg-[#edfdfd] dark:bg-zinc-800/75 border-b-2 border-brand-medium/35 dark:border-zinc-800 select-none">
               <tr>
-                <th className="py-3 px-4 font-black text-[11px] text-zinc-700 dark:text-zinc-300 uppercase tracking-wider font-mono">Contrato</th>
-                <th className="py-3 px-4 font-black text-[11px] text-zinc-700 dark:text-zinc-300 uppercase tracking-wider font-mono min-w-[170px]">Secretaria</th>
-                <th className="py-3 px-4 font-black text-[11px] text-zinc-700 dark:text-zinc-300 uppercase tracking-wider font-mono text-center">Status</th>
+                <th className="py-2 px-2 font-extrabold text-[11px] text-zinc-755 dark:text-zinc-300 uppercase tracking-wider font-mono">
+                  <div className="flex items-center gap-1">Contrato</div>
+                </th>
+                <th className="py-2 px-2 font-extrabold text-[11px] text-zinc-755 dark:text-zinc-300 uppercase tracking-wider font-mono min-w-[140px]">
+                  <div className="flex items-center gap-1">Secretaria</div>
+                </th>
+                <th className="py-2 px-2 font-extrabold text-[11px] text-zinc-755 dark:text-zinc-300 uppercase tracking-wider font-mono text-center">
+                  <div className="flex items-center justify-center gap-1">Status</div>
+                </th>
                 
-                {/* NMS Group */}
-                <th className="py-3 px-2 font-black text-[11px] text-sky-800 dark:text-sky-400 bg-sky-500/5 uppercase tracking-wider font-mono text-center border-l border-zinc-200 dark:border-zinc-850/60">NMS Básico</th>
-                <th className="py-3 px-2 font-black text-[11px] text-sky-800 dark:text-sky-400 bg-sky-500/5 uppercase tracking-wider font-mono text-center">NMS Crítico</th>
-                <th className="py-3 px-3 font-black text-[11px] text-sky-900 dark:text-sky-305 bg-sky-500/10 uppercase tracking-wider font-mono text-right pr-4">Valor NMS</th>
+                {/* UCDA Group */}
+                <th 
+                  className="py-3 px-2 font-black text-[11px] text-sky-800 dark:text-sky-400 bg-sky-500/5 uppercase tracking-wider font-mono text-center border-l border-zinc-200 dark:border-zinc-850/60 cursor-help"
+                  title="Unidade Central de Distribuição Automática de Chamadas"
+                >
+                  UCDA Básico
+                </th>
+                <th 
+                  className="py-3 px-2 font-black text-[11px] text-sky-800 dark:text-sky-400 bg-sky-500/5 uppercase tracking-wider font-mono text-center cursor-help"
+                  title="Unidade Central de Distribuição Automática de Chamadas"
+                >
+                  UCDA Crítico
+                </th>
+                <th 
+                  className="py-3 px-3 font-black text-[11px] text-sky-900 dark:text-sky-305 bg-sky-500/10 uppercase tracking-wider font-mono text-right pr-4 cursor-help"
+                  title="Unidade Central de Distribuição Automática de Chamadas"
+                >
+                  Valor UCDA
+                </th>
 
                 {/* Gravação Group */}
-                <th className="py-3 px-2 font-black text-[11px] text-emerald-800 dark:text-emerald-450 bg-emerald-500/5 uppercase tracking-wider font-mono text-center border-l border-zinc-200 dark:border-zinc-850/60">Gravação Bás.</th>
-                <th className="py-3 px-2 font-black text-[11px] text-emerald-800 dark:text-emerald-450 bg-emerald-500/5 uppercase tracking-wider font-mono text-center">Gravação Crít.</th>
-                <th className="py-3 px-3 font-black text-[11px] text-emerald-950 dark:text-emerald-305 bg-emerald-500/10 uppercase tracking-wider font-mono text-right pr-4">Valor Gravação</th>
+                <th 
+                  className="py-3 px-2 font-black text-[11px] text-emerald-800 dark:text-emerald-450 bg-emerald-500/5 uppercase tracking-wider font-mono text-center border-l border-zinc-200 dark:border-zinc-850/60 cursor-help"
+                  title="Gravação Digital de Chamadas"
+                >
+                  Gravação Bás.
+                </th>
+                <th 
+                  className="py-3 px-2 font-black text-[11px] text-emerald-800 dark:text-emerald-450 bg-emerald-500/5 uppercase tracking-wider font-mono text-center cursor-help"
+                  title="Gravação Digital de Chamadas"
+                >
+                  Gravação Crít.
+                </th>
+                <th 
+                  className="py-3 px-3 font-black text-[11px] text-emerald-950 dark:text-emerald-305 bg-emerald-500/10 uppercase tracking-wider font-mono text-right pr-4 cursor-help"
+                  title="Gravação Digital de Chamadas"
+                >
+                  Valor Gravação
+                </th>
 
                 {/* URA Group */}
-                <th className="py-3 px-2 font-black text-[11px] text-indigo-805 dark:text-indigo-400 bg-indigo-500/5 uppercase tracking-wider font-mono text-center border-l border-zinc-200 dark:border-zinc-850/60">URA Básico</th>
-                <th className="py-3 px-2 font-black text-[11px] text-indigo-805 dark:text-indigo-400 bg-indigo-500/5 uppercase tracking-wider font-mono text-center">URA Crítico</th>
-                <th className="py-3 px-3 font-black text-[11px] text-indigo-900 dark:text-indigo-305 bg-indigo-500/10 uppercase tracking-wider font-mono text-right pr-4">Valor URA</th>
+                <th 
+                  className="py-3 px-2 font-black text-[11px] text-indigo-805 dark:text-indigo-400 bg-indigo-500/5 uppercase tracking-wider font-mono text-center border-l border-zinc-200 dark:border-zinc-850/60 cursor-help"
+                  title="Unidade de Resposta Audível"
+                >
+                  URA Básico
+                </th>
+                <th 
+                  className="py-3 px-2 font-black text-[11px] text-indigo-805 dark:text-indigo-400 bg-indigo-500/5 uppercase tracking-wider font-mono text-center cursor-help"
+                  title="Unidade de Resposta Audível"
+                >
+                  URA Crítico
+                </th>
+                <th 
+                  className="py-3 px-3 font-black text-[11px] text-indigo-900 dark:text-indigo-305 bg-indigo-500/10 uppercase tracking-wider font-mono text-right pr-4 cursor-help"
+                  title="Unidade de Resposta Audível"
+                >
+                  Valor URA
+                </th>
 
                 {/* Totals & Actions */}
                 <th className="py-3 px-4 font-black text-[11px] text-brand uppercase tracking-wider font-mono text-right pr-5 border-l border-brand/20">Valor Mensal Total</th>
@@ -1383,16 +1446,16 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
 
             <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800/80">
               
-              {/* ================= FIRST TARIFF ROW (TARIFAS UNITÁRIAS) ================= */}
+              {/* ================= FIRST TARIFF ROW (TARIFAS) ================= */}
               <tr className="bg-sky-500/5 dark:bg-sky-950/20 font-bold border-b-2 border-sky-300/50 dark:border-sky-900">
-                <td className="py-2.5 px-4 text-sky-700 dark:text-sky-400 text-xs font-mono font-bold tracking-wider">
-                  TARIFAS UNITÁRIAS
+                <td className="py-1.5 px-2 text-sky-700 dark:text-sky-400 text-xs font-mono font-bold tracking-wider">
+                  TARIFAS
                 </td>
-                <td className="py-2.5 px-4 text-zinc-500 dark:text-zinc-400 text-xs italic">
+                <td className="py-1.5 px-2 text-zinc-500 dark:text-zinc-400 text-xs italic">
                   Preço Base do Serviço (BRL)
                 </td>
-                <td className="py-2.5 px-4 text-center">
-                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-brand text-white font-mono shadow-xs select-none">
+                <td className="py-1.5 px-2 text-center">
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-brand text-white font-mono shadow-xs select-none">
                     Vigente
                   </span>
                 </td>
@@ -1502,7 +1565,7 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
                 {/* Save/Edit Pricing Buttons */}
                 <td className="py-1.5 px-4 text-center">
                   {isEditingPrices ? (
-                    <div className="flex items-center justify-center gap-1.5 animate-slide-in">
+                    <div className="flex items-center justify-center gap-1 animate-slide-in">
                       <button
                         onClick={handleSavePrices}
                         className="p-1 px-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold rounded flex items-center gap-0.5 shadow-xs cursor-pointer"
@@ -1510,6 +1573,14 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
                       >
                         <Check className="h-3 w-3" />
                         <span>Salvar</span>
+                      </button>
+                      <button
+                        onClick={handleResetDefaultPrices}
+                        title="Restaurar Valores Padrão"
+                        className="p-1 px-1.5 bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold rounded flex items-center gap-0.5 shadow-xs cursor-pointer"
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                        <span>Padrão</span>
                       </button>
                       <button
                         onClick={handleCancelPrices}
@@ -1610,7 +1681,7 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
                       }`}
                     >
                       {/* Contrato */}
-                      <td className="py-2.5 px-4 font-bold text-zinc-950 dark:text-zinc-100 font-mono text-xs">
+                      <td className="py-1.5 px-2 font-bold text-zinc-900 dark:text-zinc-100 font-mono text-xs">
                         <div className="flex flex-col">
                           <span>{r.contrato}</span>
                           {isCcRowEdited && (
@@ -1623,16 +1694,16 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
                       
                       {/* Secretaria */}
                       <td 
-                        className="py-2.5 px-4 text-zinc-900 dark:text-zinc-200 font-bold text-xs max-w-[210px] truncate"
+                        className="py-1.5 px-2 text-zinc-950 dark:text-zinc-50 font-bold text-xs max-w-[170px] truncate cursor-help hover:text-brand dark:hover:text-brand-light transition-colors"
                         title={r.secretaria}
                       >
                         {r.secretaria}
                       </td>
 
                       {/* Status Badges */}
-                      <td className="py-2.5 px-4 text-center">
+                      <td className="py-1.5 px-2 text-center">
                         <div className="flex flex-col items-center justify-center">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${
+                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold ${
                             r.status === 'Ativo' 
                               ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/50'
                               : r.status === 'Suspenso'
@@ -1862,8 +1933,8 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
         </p>
         <ul className="grid grid-cols-1 md:grid-cols-3 gap-4 text-[11px] text-zinc-650 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-950 p-4 rounded-2xl border border-zinc-200/50 dark:border-zinc-850/60 font-medium">
           <li className="space-y-1">
-            <span className="font-bold text-zinc-800 dark:text-zinc-200 uppercase tracking-wide block">📞 Canais (NMS)</span>
-            Atendimento unificado básico ou de alta criticidade. <br />
+            <span className="font-bold text-zinc-800 dark:text-zinc-200 uppercase tracking-wide block cursor-help" title="Unidade Central de Distribuição Automática de Chamadas">📞 Canais (UCDA)</span>
+            Unidade Central de Distribuição Automática de Chamadas (básico ou crítico). <br />
             - Básico: <strong>R$ 440,86</strong> / canal <br />
             - Crítico: <strong>R$ 460,97</strong> / canal
           </li>
@@ -1976,9 +2047,14 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
                 </span>
                 
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  {/* NMS basic */}
+                  {/* UCDA basic */}
                   <div className="space-y-1 text-slate-800 dark:text-slate-300">
-                    <label className="text-[9.5px] font-bold text-zinc-400 uppercase font-mono">NMS Básico</label>
+                    <label 
+                      className="text-[9.5px] font-bold text-zinc-400 uppercase font-mono cursor-help"
+                      title="Unidade Central de Distribuição Automática de Chamadas"
+                    >
+                      UCDA Básico
+                    </label>
                     <input
                       type="number"
                       min="0"
@@ -1988,9 +2064,14 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
                     />
                   </div>
 
-                  {/* NMS crítico */}
+                  {/* UCDA crítico */}
                   <div className="space-y-1">
-                    <label className="text-[9.5px] font-bold text-zinc-400 uppercase font-mono">NMS Crítico</label>
+                    <label 
+                      className="text-[9.5px] font-bold text-zinc-400 uppercase font-mono cursor-help"
+                      title="Unidade Central de Distribuição Automática de Chamadas"
+                    >
+                      UCDA Crítico
+                    </label>
                     <input
                       type="number"
                       min="0"
@@ -2002,7 +2083,12 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
 
                   {/* Gravação básica */}
                   <div className="space-y-1">
-                    <label className="text-[9.5px] font-bold text-zinc-400 uppercase font-mono">Gravação Básica</label>
+                    <label 
+                      className="text-[9.5px] font-bold text-zinc-400 uppercase font-mono cursor-help"
+                      title="Gravação Digital de Chamadas"
+                    >
+                      Gravação Básica
+                    </label>
                     <input
                       type="number"
                       min="0"
@@ -2014,7 +2100,12 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
 
                   {/* Gravação crítica */}
                   <div className="space-y-1">
-                    <label className="text-[9.5px] font-bold text-zinc-400 uppercase font-mono">Gravação Crítica</label>
+                    <label 
+                      className="text-[9.5px] font-bold text-zinc-400 uppercase font-mono cursor-help"
+                      title="Gravação Digital de Chamadas"
+                    >
+                      Gravação Crítica
+                    </label>
                     <input
                       type="number"
                       min="0"
@@ -2026,7 +2117,12 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
 
                   {/* URA básica */}
                   <div className="space-y-1">
-                    <label className="text-[9.5px] font-bold text-zinc-400 uppercase font-mono">URA Básica</label>
+                    <label 
+                      className="text-[9.5px] font-bold text-zinc-400 uppercase font-mono cursor-help"
+                      title="Unidade de Resposta Audível"
+                    >
+                      URA Básica
+                    </label>
                     <input
                       type="number"
                       min="0"
@@ -2038,7 +2134,12 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
 
                   {/* URA crítica */}
                   <div className="space-y-1">
-                    <label className="text-[9.5px] font-bold text-zinc-400 uppercase font-mono">URA Crítica</label>
+                    <label 
+                      className="text-[9.5px] font-bold text-zinc-400 uppercase font-mono cursor-help"
+                      title="Unidade de Resposta Audível"
+                    >
+                      URA Crítica
+                    </label>
                     <input
                       type="number"
                       min="0"
@@ -2123,7 +2224,7 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
               <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200/50 dark:border-amber-900/30 p-3 rounded-xl flex items-start gap-2.5">
                 <AlertCircle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
                 <span className="text-[11px] text-amber-805 dark:text-amber-350 leading-relaxed font-semibold">
-                  Atenção: A replicação irá copiar todos os contratos ativos, quantidades de canais (NMS, Gravação e URA) e observações do mês de origem para o mês de destino, sobrescrevendo quaisquer faturamentos ou personalizações já existentes no mês de destino de Contact Center.
+                  Atenção: A replicação irá copiar todos os contratos ativos, quantidades de canais (UCDA, Gravação e URA) e observações do mês de origem para o mês de destino, sobrescrevendo quaisquer faturamentos ou personalizações já existentes no mês de destino de Contact Center.
                 </span>
               </div>
 

@@ -1682,7 +1682,7 @@ export default function ContractTable({
       <div id="section-to-print" className="bg-white dark:bg-zinc-900 rounded-2xl shadow-md border border-zinc-200 dark:border-zinc-800 overflow-hidden">
         
         {/* ================= DESKTOP VIEW: HORIZONTAL SCROLLING TABLE ================= */}
-        <div className="hidden lg:block overflow-x-auto">
+        <div className="hidden lg:block table-scrollbar-fluid">
           <table className="w-full border-collapse text-left text-sm whitespace-nowrap">
             <thead className="bg-[#edfdfd] dark:bg-zinc-800/55 border-b-2 border-brand-light/45 dark:border-zinc-800">
               <tr>

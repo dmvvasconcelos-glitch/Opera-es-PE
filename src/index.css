@@ -173,3 +173,73 @@ html, body, #root {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Fluid, instant, ultra-responsive scrollbar for tables */
+.table-scrollbar-fluid {
+  overflow-x: auto;
+  scroll-behavior: auto !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(43, 138, 139, 0.55) rgba(244, 244, 245, 0.6);
+  will-change: scroll-position;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.dark .table-scrollbar-fluid {
+  scrollbar-color: rgba(54, 164, 166, 0.6) rgba(39, 39, 42, 0.4);
+}
+
+.table-scrollbar-fluid::-webkit-scrollbar {
+  height: 9px;
+  width: 9px;
+}
+
+.table-scrollbar-fluid::-webkit-scrollbar-track {
+  background: rgba(244, 244, 245, 0.75);
+  border-radius: 9999px;
+  margin: 0 4px;
+}
+
+.dark .table-scrollbar-fluid::-webkit-scrollbar-track {
+  background: rgba(39, 39, 42, 0.55);
+}
+
+.table-scrollbar-fluid::-webkit-scrollbar-thumb {
+  background: rgba(43, 138, 139, 0.55);
+  border-radius: 9999px;
+  border: 1.5px solid transparent;
+  background-clip: padding-box;
+  cursor: grab;
+}
+
+.table-scrollbar-fluid::-webkit-scrollbar-thumb:hover {
+  background: rgba(43, 138, 139, 0.85);
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+
+.table-scrollbar-fluid::-webkit-scrollbar-thumb:active {
+  background: rgba(30, 107, 108, 0.95);
+  cursor: grabbing;
+}
+
+.dark .table-scrollbar-fluid::-webkit-scrollbar-thumb {
+  background: rgba(54, 164, 166, 0.55);
+  border: 1.5px solid transparent;
+  background-clip: padding-box;
+  cursor: grab;
+}
+
+.dark .table-scrollbar-fluid::-webkit-scrollbar-thumb:hover {
+  background: rgba(54, 164, 166, 0.9);
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+
+.dark .table-scrollbar-fluid::-webkit-scrollbar-thumb:active {
+  background: rgba(43, 138, 139, 1);
+  cursor: grabbing;
+}
+
