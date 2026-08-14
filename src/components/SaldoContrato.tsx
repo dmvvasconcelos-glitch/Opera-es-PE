@@ -1134,7 +1134,6 @@ export default function SaldoContrato({
                     <th className="py-3 px-4 text-right">Qtd Disponível</th>
                     <th className="py-3 px-4 text-right">Valor Disponível (R$)</th>
                     <th className="py-3 px-4 text-center">Consumo %</th>
-                    <th className="py-3 px-4 text-center">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-200/70 dark:divide-zinc-800/60 font-medium">
@@ -1175,11 +1174,6 @@ export default function SaldoContrato({
                         </span>
                       </div>
                     </td>
-                    <td className="py-3.5 px-4 text-center">
-                      <span className="inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-800/40">
-                        Normal
-                      </span>
-                    </td>
                   </tr>
 
                   {/* Row CC */}
@@ -1219,11 +1213,6 @@ export default function SaldoContrato({
                         </span>
                       </div>
                     </td>
-                    <td className="py-3.5 px-4 text-center">
-                      <span className="inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-800/40">
-                        Normal
-                      </span>
-                    </td>
                   </tr>
                 </tbody>
                 <tfoot className="bg-zinc-100/90 dark:bg-zinc-950/80 font-bold border-t-2 border-zinc-300 dark:border-zinc-800 text-zinc-900 dark:text-zinc-200">
@@ -1250,11 +1239,6 @@ export default function SaldoContrato({
                     <td className="py-3.5 px-4 text-center font-mono font-bold text-xs text-zinc-800 dark:text-zinc-200">
                       {grandTotals.percentUsed.toFixed(1)}%
                     </td>
-                    <td className="py-3.5 px-4 text-center">
-                      <span className="inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100/80 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300/80 dark:border-emerald-800/60">
-                        Auditado
-                      </span>
-                    </td>
                   </tr>
                 </tfoot>
               </table>
@@ -1263,26 +1247,26 @@ export default function SaldoContrato({
 
           {/* Side-by-side Top Items Cards */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Top PVF Items */}
+            {/* Top PVF Items - Showing all 10 items */}
             <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800/80 shadow-xs space-y-4">
               <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800/80 pb-3">
                 <div className="flex items-center gap-2">
                   <Phone className="h-4.5 w-4.5 text-sky-500 dark:text-sky-400" />
                   <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-800 dark:text-zinc-200">
-                    Ponto de Voz Fixo - Principais Itens
+                    Ponto de Voz Fixo - Itens do Contrato (10 Itens)
                   </h4>
                 </div>
                 <button
                   onClick={() => setActiveSubView('pvf')}
                   className="text-xs text-brand dark:text-brand-light font-bold hover:underline flex items-center gap-1 cursor-pointer"
                 >
-                  <span>Ver todos (10)</span>
+                  <span>Ver tabela completa</span>
                   <ArrowUpRight className="h-3.5 w-3.5" />
                 </button>
               </div>
 
               <div className="space-y-3">
-                {pvfItemsData.slice(0, 5).map(item => (
+                {pvfItemsData.map(item => (
                   <div key={item.key} className="p-3.5 rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200/80 dark:border-zinc-800/70 hover:bg-zinc-500/[0.04] dark:hover:bg-white/[0.03] transition-colors">
                     <div className="flex items-center justify-between text-xs font-bold">
                       <span className="text-zinc-800 dark:text-zinc-200">{item.label}</span>
@@ -1396,7 +1380,6 @@ export default function SaldoContrato({
                     <th className="py-3 px-4 text-right">Qtd Disponível</th>
                     <th className="py-3 px-4 text-right">Valor Disponível (R$)</th>
                     <th className="py-3 px-4 text-center">Consumo %</th>
-                    <th className="py-3 px-4 text-center">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-200/70 dark:divide-zinc-800/60 font-medium">
@@ -1441,22 +1424,11 @@ export default function SaldoContrato({
                           </span>
                         </div>
                       </td>
-                      <td className="py-3 px-4 text-center">
-                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                          item.statusCategory === 'critico'
-                            ? 'bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-400 border border-rose-200/60 dark:border-rose-800/40'
-                            : item.statusCategory === 'alerta'
-                            ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800/40'
-                            : 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-800/40'
-                        }`}>
-                          {item.statusLabel}
-                        </span>
-                      </td>
                     </tr>
                   ))}
                   {filteredPvfItems.length === 0 && (
                     <tr>
-                      <td colSpan={10} className="py-8 text-center text-zinc-400 dark:text-zinc-500">
+                      <td colSpan={9} className="py-8 text-center text-zinc-400 dark:text-zinc-500">
                         Nenhum item encontrado.
                       </td>
                     </tr>
@@ -1486,11 +1458,6 @@ export default function SaldoContrato({
                     </td>
                     <td className="py-3.5 px-4 text-center font-mono font-bold text-xs text-zinc-800 dark:text-zinc-200">
                       {pvfTotals.percentUsed.toFixed(1)}%
-                    </td>
-                    <td className="py-3.5 px-4 text-center">
-                      <span className="inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100/80 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300/80 dark:border-emerald-800/60">
-                        Auditado
-                      </span>
                     </td>
                   </tr>
                 </tfoot>
@@ -1538,7 +1505,6 @@ export default function SaldoContrato({
                     <th className="py-3 px-4 text-right">Qtd Disponível</th>
                     <th className="py-3 px-4 text-right">Valor Disponível (R$)</th>
                     <th className="py-3 px-4 text-center">Consumo %</th>
-                    <th className="py-3 px-4 text-center">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-200/70 dark:divide-zinc-800/60 font-medium">
@@ -1583,22 +1549,11 @@ export default function SaldoContrato({
                           </span>
                         </div>
                       </td>
-                      <td className="py-3 px-4 text-center">
-                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                          item.statusCategory === 'critico'
-                            ? 'bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-400 border border-rose-200/60 dark:border-rose-800/40'
-                            : item.statusCategory === 'alerta'
-                            ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800/40'
-                            : 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-800/40'
-                        }`}>
-                          {item.statusLabel}
-                        </span>
-                      </td>
                     </tr>
                   ))}
                   {filteredCcItems.length === 0 && (
                     <tr>
-                      <td colSpan={10} className="py-8 text-center text-zinc-400 dark:text-zinc-500">
+                      <td colSpan={9} className="py-8 text-center text-zinc-400 dark:text-zinc-500">
                         Nenhum serviço encontrado.
                       </td>
                     </tr>
@@ -1628,11 +1583,6 @@ export default function SaldoContrato({
                     </td>
                     <td className="py-3.5 px-4 text-center font-mono font-bold text-xs text-zinc-800 dark:text-zinc-200">
                       {ccTotals.percentUsed.toFixed(1)}%
-                    </td>
-                    <td className="py-3.5 px-4 text-center">
-                      <span className="inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100/80 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300/80 dark:border-emerald-800/60">
-                        Auditado
-                      </span>
                     </td>
                   </tr>
                 </tfoot>
