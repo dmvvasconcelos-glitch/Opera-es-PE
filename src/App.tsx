@@ -19,6 +19,7 @@ import UmTelecomBilling from './components/UmTelecomBilling';
 import VectraBilling from './components/VectraBilling';
 import StarlinkBilling from './components/StarlinkBilling';
 import ContactCenterBilling from './components/ContactCenterBilling';
+import SaldoContrato from './components/SaldoContrato';
 import { db, handleFirestoreError, OperationType, cleanUndefined, onSnapshot, getDocs, getDoc, setDoc, deleteDoc, writeBatch, onQuotaExceeded } from './firebase';
 import { collection, doc } from 'firebase/firestore';
 import { 
@@ -41,6 +42,7 @@ import {
   ChevronDown,
   Phone,
   Headset,
+  Scale,
   Activity,
   Award,
   Lock,
@@ -72,6 +74,7 @@ const ALL_TABS: ActiveTab[] = [
   'dashboard',
   'contratos',
   'contact-center',
+  'saldo-contrato',
   'um-telecom',
   'starlink',
   'vectra',
@@ -131,7 +134,7 @@ export default function App() {
       return screenId === 'atividades';
     }
     if (user.role === 'cliente') {
-      return ['dashboard', 'contratos', 'contact-center'].includes(screenId);
+      return ['dashboard', 'contratos', 'contact-center', 'saldo-contrato'].includes(screenId);
     }
     // For others (editor, viewer)
     if (screenId === 'usuarios' || screenId === 'parceiros' || screenId === 'lpu') {
@@ -673,9 +676,9 @@ export default function App() {
     switch (activeTab) {
       case 'dashboard': return 'Painel Gerencial';
       case 'contratos': return 'Faturamento PVF';
-      case 'historico': return 'Histórico de Faturamento';
-      case 'usuarios': return 'Controle de Usuários';
       case 'contact-center': return 'Faturamento Contact Center';
+      case 'saldo-contrato': return 'Saldo de Contrato';
+      case 'historico': return 'Histórico de Faturamento';
       case 'um-telecom': return 'Faturamento Infra e Elétrica PCM';
       case 'vectra': return 'Faturamento Vectra';
       case 'starlink': return 'Implantação Starlink';
@@ -877,6 +880,20 @@ export default function App() {
                               <span className="text-xs">Vectra</span>
                             </button>
                           )}
+
+                          {isScreenAllowed('saldo-contrato') && (
+                            <button
+                              onClick={() => setActiveTab('saldo-contrato')}
+                              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-all duration-200 cursor-pointer ${
+                                activeTab === 'saldo-contrato'
+                                  ? 'bg-brand/45 dark:bg-zinc-850 text-white font-bold'
+                                  : 'hover:bg-brand-medium/15 dark:hover:bg-zinc-900/35 text-zinc-350 hover:text-white'
+                              }`}
+                            >
+                              <Scale className={`h-4 w-4 shrink-0 ${activeTab === 'saldo-contrato' ? 'text-brand-light dark:text-brand' : 'text-zinc-500'}`} />
+                              <span className="text-xs">Saldo Contrato</span>
+                            </button>
+                          )}
                         </motion.div>
                       )}
                     </AnimatePresence>
@@ -950,6 +967,20 @@ export default function App() {
                         title="Vectra"
                       >
                         <Network className={`h-4.5 w-4.5 ${activeTab === 'vectra' ? 'text-brand-light dark:text-brand animate-pulse' : 'text-zinc-400'}`} />
+                      </button>
+                    )}
+
+                    {isScreenAllowed('saldo-contrato') && (
+                      <button
+                        onClick={() => setActiveTab('saldo-contrato')}
+                        className={`w-full flex items-center justify-center py-2.5 rounded-xl transition-all duration-200 cursor-pointer ${
+                          activeTab === 'saldo-contrato'
+                            ? 'bg-brand-medium dark:bg-zinc-900 text-white shadow-sm'
+                            : 'hover:bg-brand-medium/20 text-zinc-400 hover:text-white'
+                        }`}
+                        title="Saldo do Contrato"
+                      >
+                        <Scale className={`h-4.5 w-4.5 ${activeTab === 'saldo-contrato' ? 'text-brand-light dark:text-brand animate-pulse' : 'text-zinc-400'}`} />
                       </button>
                     )}
                   </div>
@@ -1371,6 +1402,23 @@ export default function App() {
                                         <span className="text-xs">Vectra</span>
                                       </button>
                                     )}
+
+                                    {isScreenAllowed('saldo-contrato') && (
+                                      <button
+                                        onClick={() => {
+                                          setActiveTab('saldo-contrato');
+                                          setIsMobileSidebarOpen(false);
+                                        }}
+                                        className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-all cursor-pointer ${
+                                          activeTab === 'saldo-contrato'
+                                            ? 'bg-zinc-900 text-white font-bold'
+                                            : 'hover:bg-zinc-900/30 text-zinc-404 hover:text-white'
+                                        }`}
+                                      >
+                                        <Scale className={`h-4 w-4 shrink-0 ${activeTab === 'saldo-contrato' ? 'text-brand' : 'text-zinc-550'}`} />
+                                        <span className="text-xs">Saldo Contrato</span>
+                                      </button>
+                                    )}
                                   </motion.div>
                                 )}
                               </AnimatePresence>
@@ -1679,6 +1727,10 @@ export default function App() {
               
               {activeTab === 'contact-center' && isScreenAllowed('contact-center') && (
                 <ContactCenterBilling user={user} />
+              )}
+
+              {activeTab === 'saldo-contrato' && isScreenAllowed('saldo-contrato') && (
+                <SaldoContrato user={user} pvfPrices={prices} pvfContracts={contracts} />
               )}
 
               {activeTab === 'um-telecom' && isScreenAllowed('um-telecom') && (

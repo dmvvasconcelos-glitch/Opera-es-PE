@@ -11,6 +11,8 @@ import {
   Info, 
   FileText, 
   ChevronDown, 
+  ChevronLeft,
+  ChevronRight,
   Layers, 
   DollarSign, 
   Activity, 
@@ -413,6 +415,20 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
 
   // Months lists
   const availableMonths = getAvailableMonths();
+
+  const handlePrevMonth = () => {
+    const idx = availableMonths.indexOf(referenceMonth);
+    if (idx > 0) {
+      setReferenceMonth(availableMonths[idx - 1]);
+    }
+  };
+
+  const handleNextMonth = () => {
+    const idx = availableMonths.indexOf(referenceMonth);
+    if (idx < availableMonths.length - 1) {
+      setReferenceMonth(availableMonths[idx + 1]);
+    }
+  };
 
   // Records filtered for current reference month loaded cleanly from Firestore
   const activeRecords = useMemo(() => {
@@ -1040,70 +1056,88 @@ export default function UmTelecomBilling({ user }: { user?: UserSession | null }
         </div>
       )}
 
-      {/* Title Header Card */}
-      <div className="relative overflow-hidden rounded-3.5xl border border-zinc-200/80 dark:border-zinc-800/80 bg-white dark:bg-zinc-900 p-6 md:p-8 shadow-xs">
-        <div className="absolute right-0 top-0 -mr-16 -mt-16 w-48 h-48 rounded-full bg-brand/5 dark:bg-brand/10 blur-3xl pointer-events-none" />
-        <div className="absolute left-1/3 bottom-0 w-64 h-64 rounded-full bg-umtelecom/5 blur-3xl pointer-events-none" />
-        
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-umtelecom/10 text-umtelecom dark:bg-zinc-800 dark:text-brand-light">
-              <Zap className="h-3 w-3 animate-pulse text-umtelecom" />
-              Um Telecom
+      {/* Header Banner - High contrast dark styling */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950 p-6 text-white shadow-xl border border-zinc-800">
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+          <div className="space-y-1.5 max-w-2xl">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-800/80 border border-zinc-700/80 text-[11px] font-bold text-sky-300 uppercase tracking-wider backdrop-blur-xs">
+              <Zap className="h-3.5 w-3.5 text-sky-400" />
+              <span>UM TELECOM</span>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-zinc-900 dark:text-white font-sans flex items-center gap-2">
-              Faturamento Infra e Elétrica PCM
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white font-sans flex items-center gap-2.5">
+              <Zap className="h-7 w-7 text-sky-400" />
+              <span>Faturamento Infra e Elétrica PCM</span>
             </h1>
-            <p className="text-zinc-500 dark:text-zinc-400 text-sm max-w-2xl leading-relaxed">
+            <p className="text-xs sm:text-sm text-zinc-300 font-sans leading-relaxed">
               Consolidação de faturamento de manutenção elétrica estrutural e infraestrutura física de estações PCM.
             </p>
           </div>
-          
-          {/* Reference Month Selector & Export Controls */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
-            {/* Reference Month Selector */}
-            <div className="flex flex-col justify-center bg-zinc-50 dark:bg-zinc-950 px-5 py-3 rounded-2.5xl border border-zinc-200/50 dark:border-zinc-850/65 min-w-[220px]">
-              <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest font-mono">Mês de Referência</span>
-              <div className="relative mt-1">
-                <select
-                  value={referenceMonth}
-                  onChange={(e) => setReferenceMonth(e.target.value)}
-                  className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-bold text-zinc-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-umtelecom appearance-none cursor-pointer pr-10 shadow-xs"
-                >
-                  {availableMonths.map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-3.5 top-2.5 h-4 w-4 text-zinc-400 pointer-events-none" />
-              </div>
+
+          {/* Month Selector & Export Actions */}
+          <div className="flex flex-wrap items-center gap-3 bg-zinc-900/80 p-3 rounded-xl border border-zinc-750/80 backdrop-blur-xs">
+            <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-700 px-3 py-1.5 rounded-lg text-white">
+              <button
+                type="button"
+                onClick={handlePrevMonth}
+                className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                title="Mês Anterior"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+
+              <select
+                value={referenceMonth}
+                onChange={(e) => setReferenceMonth(e.target.value)}
+                className="bg-transparent text-xs font-bold tracking-wide focus:outline-hidden cursor-pointer text-white px-2 py-0.5 text-center"
+              >
+                {availableMonths.map((m) => (
+                  <option key={m} value={m} className="bg-zinc-900 text-white">
+                    {m}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                onClick={handleNextMonth}
+                className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                title="Próximo Mês"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
             </div>
 
-            {/* Export Buttons Group */}
-            <div className="flex flex-row sm:flex-col gap-2 shrink-0">
-              <button
-                onClick={() => setShowConfig(!showConfig)}
-                className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all shadow-xs cursor-pointer active:scale-95 duration-150 border border-zinc-250 dark:border-zinc-700"
-              >
-                <Sliders className="h-4 w-4" />
-                <span>Ajustar Tarifas</span>
-              </button>
-              <button
-                onClick={exportToExcel}
-                className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all shadow-xs cursor-pointer active:scale-95 duration-150"
-                id="btn-export-excel"
-              >
-                <FileSpreadsheet className="h-4 w-4 text-white" />
-                <span>Planilha Excel</span>
-              </button>
-              <button
-                onClick={exportToPDF}
-                className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all shadow-xs cursor-pointer active:scale-95 duration-150"
-                id="btn-export-pdf"
-              >
-                <FileText className="h-4 w-4 text-white" />
-                <span>Relatório PDF</span>
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowConfig(!showConfig)}
+              className="flex items-center gap-2 px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-850 text-white rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer duration-150 border border-zinc-700"
+              title="Ajustar Tarifas Contratuais"
+            >
+              <Sliders className="h-4 w-4" />
+              <span>Ajustar Tarifas</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={exportToExcel}
+              className="flex items-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer duration-150"
+              title="Exportar dados para Excel (.xlsx)"
+              id="btn-export-excel"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              <span>Planilha Excel</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={exportToPDF}
+              className="flex items-center gap-2 px-3.5 py-2 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer duration-150"
+              title="Exportar demonstrativo em PDF"
+              id="btn-export-pdf"
+            >
+              <FileText className="h-4 w-4" />
+              <span>Relatório PDF</span>
+            </button>
           </div>
         </div>
       </div>

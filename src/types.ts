@@ -79,5 +79,5 @@ export interface LpuSettings {
   raioQuilometragem: string;
 }
 
-export type ActiveTab = 'dashboard' | 'contratos' | 'relatorios' | 'precos' | 'usuarios' | 'historico' | 'contact-center' | 'um-telecom' | 'vectra' | 'starlink' | 'fornecedores' | 'parceiros' | 'lpu' | 'atividades';
+export type ActiveTab = 'dashboard' | 'contratos' | 'relatorios' | 'precos' | 'usuarios' | 'historico' | 'contact-center' | 'um-telecom' | 'vectra' | 'starlink' | 'fornecedores' | 'parceiros' | 'lpu' | 'atividades' | 'saldo-contrato';
 

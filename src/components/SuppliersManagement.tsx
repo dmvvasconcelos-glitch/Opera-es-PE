@@ -23,7 +23,9 @@ import {
   ArrowRight,
   TrendingUp,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType, onSnapshot, setDoc, deleteDoc } from '../firebase';
 import { collection, doc } from 'firebase/firestore';
@@ -40,6 +42,20 @@ export default function SuppliersManagement({ currentUser, activeSection = 'parc
 
   const [referenceMonth, setReferenceMonth] = useCurrentMonthFilter();
   const availableMonths = getAvailableMonths();
+
+  const handlePrevMonth = () => {
+    const idx = availableMonths.indexOf(referenceMonth);
+    if (idx > 0) {
+      setReferenceMonth(availableMonths[idx - 1]);
+    }
+  };
+
+  const handleNextMonth = () => {
+    const idx = availableMonths.indexOf(referenceMonth);
+    if (idx < availableMonths.length - 1) {
+      setReferenceMonth(availableMonths[idx + 1]);
+    }
+  };
 
   // State for Suppliers
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -417,43 +433,57 @@ export default function SuppliersManagement({ currentUser, activeSection = 'parc
         </div>
       )}
 
-      {/* Title Header Card - Starlink Layout */}
-      <div className="relative overflow-hidden rounded-3.5xl border border-zinc-200/80 dark:border-zinc-800/80 bg-white dark:bg-zinc-900 p-6 md:p-8 shadow-xs">
-        <div className="absolute right-0 top-0 -mr-16 -mt-16 w-48 h-48 rounded-full bg-cyan-500/5 dark:bg-cyan-500/10 blur-3xl pointer-events-none" />
-        <div className="absolute left-1/3 bottom-0 w-64 h-64 rounded-full bg-indigo-500/5 blur-3xl pointer-events-none" />
-        
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-cyan-500/10 text-cyan-600 dark:bg-zinc-800 dark:text-cyan-405">
-              <Building2 className="h-3 w-3 animate-pulse text-cyan-600" />
-              {activeSection === 'parceiros' ? 'MÓDULO DE PARCEIROS' : 'MÓDULO LPU'}
+      {/* Header Banner - High contrast dark styling */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950 p-6 text-white shadow-xl border border-zinc-800">
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+          <div className="space-y-1.5 max-w-2xl">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-800/80 border border-zinc-700/80 text-[11px] font-bold text-sky-300 uppercase tracking-wider backdrop-blur-xs">
+              <Building2 className="h-3.5 w-3.5 text-sky-400" />
+              <span>{activeSection === 'parceiros' ? 'MÓDULO DE PARCEIROS' : 'MÓDULO LPU'}</span>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-zinc-900 dark:text-white font-sans flex items-center gap-2">
-              {activeSection === 'parceiros' ? 'Cadastro de Parceiros' : 'LPU de Serviços'}
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white font-sans flex items-center gap-2.5">
+              <Building2 className="h-7 w-7 text-sky-400" />
+              <span>{activeSection === 'parceiros' ? 'Cadastro de Parceiros' : 'LPU de Serviços'}</span>
             </h1>
-            <p className="text-zinc-500 dark:text-zinc-450 text-xs max-w-2xl leading-relaxed">
+            <p className="text-xs sm:text-sm text-zinc-300 font-sans leading-relaxed">
               {activeSection === 'parceiros' 
                 ? 'Painel administrativo para cadastro e consulta de parceiros estratégicos, controle de CPF/CNPJ e informações de contato.' 
                 : 'Tabelas de Preços Unitários (LPU) e configurações de quilometragem para atividades operacionais.'}
             </p>
           </div>
-          
-          {/* Month Selector on Right Side */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
-            <div className="flex flex-col justify-center bg-zinc-50 dark:bg-zinc-950 px-5 py-3 rounded-2.5xl border border-zinc-200/50 dark:border-zinc-850/65 min-w-[220px]">
-              <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest font-mono">Mês de Referência</span>
-              <div className="relative mt-1">
-                <select
-                  value={referenceMonth}
-                  onChange={(e) => setReferenceMonth(e.target.value)}
-                  className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-bold text-zinc-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-cyan-500 appearance-none cursor-pointer pr-10 shadow-xs"
-                >
-                  {availableMonths.map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-3.5 top-2.5 h-4 w-4 text-zinc-400 pointer-events-none" />
-              </div>
+
+          {/* Month Selector */}
+          <div className="flex flex-wrap items-center gap-3 bg-zinc-900/80 p-3 rounded-xl border border-zinc-750/80 backdrop-blur-xs">
+            <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-700 px-3 py-1.5 rounded-lg text-white">
+              <button
+                type="button"
+                onClick={handlePrevMonth}
+                className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                title="Mês Anterior"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+
+              <select
+                value={referenceMonth}
+                onChange={(e) => setReferenceMonth(e.target.value)}
+                className="bg-transparent text-xs font-bold tracking-wide focus:outline-hidden cursor-pointer text-white px-2 py-0.5 text-center"
+              >
+                {availableMonths.map((m) => (
+                  <option key={m} value={m} className="bg-zinc-900 text-white">
+                    {m}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                onClick={handleNextMonth}
+                className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                title="Próximo Mês"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
             </div>
           </div>
         </div>
