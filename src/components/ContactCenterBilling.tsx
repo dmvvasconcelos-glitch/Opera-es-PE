@@ -39,8 +39,11 @@ import {
   Headset,
   Building,
   DollarSign,
-  Layers
+  Layers,
+  History
 } from 'lucide-react';
+import { recordTariffChange } from '../services/tariffAudit';
+import TariffHistoryModal from './TariffHistoryModal';
 
 // Interfaces
 export interface ContactCenterOS {
@@ -78,6 +81,15 @@ const DEFAULT_CC_PRICES: ContactCenterPrices = {
   uraCritica: 303.01
 };
 
+const CC_LABELS: Record<string, string> = {
+  nmsBasico: 'UCDA Básico (NMS)',
+  nmsCritico: 'UCDA Crítico (NMS)',
+  gravacaoBasica: 'Gravação Telefônica Básica',
+  gravacaoCritica: 'Gravação Telefônica Crítica',
+  uraBasica: 'URA Básica (Resposta Audível)',
+  uraCritica: 'URA Crítica (Resposta Audível)'
+};
+
 // Initial Mock Records
 export const PRESEEDED_CONTACT_CENTER: ContactCenterOS[] = [
   {
@@ -98,7 +110,7 @@ export const PRESEEDED_CONTACT_CENTER: ContactCenterOS[] = [
   {
     id: 'cc-preseed-2',
     contrato: 'CT-2026/089',
-    secretaria: 'Secretaria de Saúde (SES)',
+    secretaria: 'Secretaria Estadual de Saúde',
     referenceMonth: 'Junho/2026',
     status: 'Ativo',
     nmsBasico: 6,
@@ -170,6 +182,7 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
   // Editing Tariffs Inline
   const [isEditingPrices, setIsEditingPrices] = useState(false);
   const [tempPrices, setTempPrices] = useState<ContactCenterPrices>({ ...DEFAULT_CC_PRICES });
+  const [showTariffHistory, setShowTariffHistory] = useState(false);
 
   // Creation/Edit Modal State
   const [showFormModal, setShowFormModal] = useState(false);
@@ -239,7 +252,12 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
     const unsub = onSnapshot(colRef, async (snapshot) => {
       const list: ContactCenterOS[] = [];
       snapshot.forEach((docSnap) => {
-        list.push({ id: docSnap.id, ...docSnap.data() } as ContactCenterOS);
+        const raw = docSnap.data() as ContactCenterOS;
+        let sec = raw.secretaria || '';
+        if (sec === 'Secretaria de Saúde' || sec === 'Secretaria de Saúde (SES)' || sec.startsWith('Secretaria de Saúde')) {
+          sec = sec.replace('Secretaria de Saúde', 'Secretaria Estadual de Saúde');
+        }
+        list.push({ id: docSnap.id, ...raw, secretaria: sec } as ContactCenterOS);
       });
 
       const targetMonths = [
@@ -547,6 +565,20 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
   // Inline pricing edits save
   const handleSavePrices = async () => {
     try {
+      try {
+        await recordTariffChange({
+          moduleId: 'contactCenter',
+          moduleName: 'Contact Center',
+          action: 'update',
+          user,
+          oldValues: prices as unknown as Record<string, number>,
+          newValues: tempPrices as unknown as Record<string, number>,
+          labelsMap: CC_LABELS
+        });
+      } catch (auditErr) {
+        console.warn('Erro ao registrar log de auditoria de tarifas Contact Center:', auditErr);
+      }
+
       await setDoc(doc(db, 'systemPrices', 'contactCenter'), tempPrices);
       setPrices(tempPrices);
       setIsEditingPrices(false);
@@ -563,6 +595,21 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
 
   const handleResetDefaultPrices = async () => {
     try {
+      try {
+        await recordTariffChange({
+          moduleId: 'contactCenter',
+          moduleName: 'Contact Center',
+          action: 'reset',
+          user,
+          oldValues: prices as unknown as Record<string, number>,
+          newValues: DEFAULT_CC_PRICES as unknown as Record<string, number>,
+          labelsMap: CC_LABELS,
+          notes: 'Tarifas de Contact Center restauradas aos valores unitários padrão do sistema.'
+        });
+      } catch (auditErr) {
+        console.warn('Erro ao registrar log de auditoria de tarifas Contact Center:', auditErr);
+      }
+
       await setDoc(doc(db, 'systemPrices', 'contactCenter'), DEFAULT_CC_PRICES);
       setTempPrices({ ...DEFAULT_CC_PRICES });
       setPrices({ ...DEFAULT_CC_PRICES });
@@ -1206,12 +1253,13 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
             </p>
           </div>
 
-          {/* Month Selector & Export Actions */}
-          <div className="flex flex-wrap items-center gap-3 bg-zinc-900/80 p-3 rounded-xl border border-zinc-750/80 backdrop-blur-xs">
-            <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-700 px-3 py-1.5 rounded-lg text-white">
+          {/* Month Selector & Export Actions (Month on top, action buttons below) */}
+          <div className="flex flex-col gap-2.5 bg-zinc-900/90 p-3 rounded-2xl border border-zinc-800 shadow-lg backdrop-blur-md w-full lg:w-auto">
+            {/* Top: Month Selector */}
+            <div className="flex items-center justify-between sm:justify-center gap-2 bg-zinc-950 border border-zinc-700/80 px-3 py-2 rounded-xl text-white shadow-inner">
               <button
                 onClick={handlePrevMonth}
-                className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                className="p-1 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors cursor-pointer"
                 title="Mês Anterior"
               >
                 <ChevronLeft className="h-4 w-4" />
@@ -1220,7 +1268,7 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
               <select
                 value={referenceMonth}
                 onChange={(e) => setReferenceMonth(e.target.value)}
-                className="bg-transparent text-xs font-bold tracking-wide focus:outline-hidden cursor-pointer text-white px-2 py-0.5 text-center"
+                className="bg-transparent text-xs sm:text-sm font-bold tracking-wide focus:outline-hidden cursor-pointer text-white px-2 py-0.5 text-center"
               >
                 {availableMonths.map((m) => (
                   <option key={m} value={m} className="bg-zinc-900 text-white">
@@ -1231,30 +1279,33 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
 
               <button
                 onClick={handleNextMonth}
-                className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                className="p-1 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors cursor-pointer"
                 title="Próximo Mês"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
 
-            <button
-              onClick={exportToExcel}
-              className="flex items-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer duration-150"
-              title="Exportar dados para Excel (.xlsx)"
-            >
-              <FileSpreadsheet className="h-4 w-4" />
-              <span>Planilha Excel</span>
-            </button>
+            {/* Bottom: Action Buttons */}
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+              <button
+                onClick={exportToExcel}
+                className="flex-1 sm:flex-initial px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer hover:scale-102 active:scale-98 whitespace-nowrap"
+                title="Exportar dados para Excel (.xlsx)"
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                <span>Planilha Excel</span>
+              </button>
 
-            <button
-              onClick={exportToPDF}
-              className="flex items-center gap-2 px-3.5 py-2 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer duration-150"
-              title="Exportar demonstrativo em PDF"
-            >
-              <FileText className="h-4 w-4" />
-              <span>Relatório PDF</span>
-            </button>
+              <button
+                onClick={exportToPDF}
+                className="flex-1 sm:flex-initial px-3.5 py-2 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer hover:scale-102 active:scale-98 whitespace-nowrap"
+                title="Exportar demonstrativo em PDF"
+              >
+                <FileText className="h-4 w-4" />
+                <span>Relatório PDF</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1617,13 +1668,24 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
                       </button>
                     </div>
                   ) : canModify ? (
-                    <button
-                      onClick={() => setIsEditingPrices(true)}
-                      className="inline-flex items-center gap-1 mx-auto text-[10px] px-2 py-1 bg-white hover:bg-sky-50 dark:bg-zinc-800 border border-sky-300 dark:border-zinc-700 text-sky-700 dark:text-sky-400 font-bold rounded-lg shadow-2xs transition-all pointer cursor-pointer"
-                    >
-                      <Settings className="h-3 w-3" />
-                      <span>Alterar Tarifas</span>
-                    </button>
+                    <div className="flex items-center justify-center gap-1.5">
+                      <button
+                        onClick={() => setIsEditingPrices(true)}
+                        className="inline-flex items-center gap-1 text-[10px] px-2 py-1 bg-white hover:bg-sky-50 dark:bg-zinc-800 border border-sky-300 dark:border-zinc-700 text-sky-700 dark:text-sky-400 font-bold rounded-lg shadow-2xs transition-all pointer cursor-pointer"
+                      >
+                        <Settings className="h-3 w-3" />
+                        <span>Alterar Tarifas</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowTariffHistory(true)}
+                        title="Ver Histórico de Alterações de Tarifas"
+                        className="inline-flex items-center gap-1 text-[10px] px-1.5 py-1 bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/50 border border-sky-300 dark:border-sky-800 text-sky-700 dark:text-sky-300 font-bold rounded-lg shadow-2xs transition-all pointer cursor-pointer"
+                      >
+                        <History className="h-3 w-3" />
+                        <span>Histórico</span>
+                      </button>
+                    </div>
                   ) : (
                     <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-bold uppercase font-mono tracking-wider flex items-center justify-center gap-1 select-none">
                       <ShieldCheck className="h-3 w-3 text-brand-medium" />
@@ -2023,7 +2085,7 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
                   <input
                     type="text"
                     required
-                    placeholder="Ex: Secretaria de Saúde (SES)"
+                    placeholder="Ex: Secretaria Estadual de Saúde"
                     value={formSecretaria}
                     onChange={(e) => setFormSecretaria(e.target.value)}
                     className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-brand"
@@ -2355,6 +2417,14 @@ export default function ContactCenterBilling({ user }: ContactCenterBillingProps
           </div>
         </div>
       )}
+
+      {/* Tariff Audit History Modal */}
+      <TariffHistoryModal
+        isOpen={showTariffHistory}
+        onClose={() => setShowTariffHistory(false)}
+        defaultModule="contactCenter"
+        user={user}
+      />
 
     </div>
   );

@@ -422,5 +422,13 @@ service cloud.firestore {
       allow create, update: if isValidId(activityId) && isValidOperationalActivity(incoming());
       allow delete: if isValidId(activityId);
     }
+
+    // tariffAuditLogs rules
+    match /tariffAuditLogs/{logId} {
+      allow read: if true;
+      allow create: if isValidId(logId);
+      allow update: if false; // immutable audit log
+      allow delete: if isValidId(logId);
+    }
   }
 }

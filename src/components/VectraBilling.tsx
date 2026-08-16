@@ -26,7 +26,8 @@ import {
   Wrench,
   Wifi,
   FileSpreadsheet,
-  ShieldAlert
+  ShieldAlert,
+  History
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
@@ -34,6 +35,8 @@ import { db, handleFirestoreError, OperationType, cleanUndefined, onSnapshot, ge
 import { collection, doc } from 'firebase/firestore';
 import { UserSession } from '../types';
 import { useCurrentMonthFilter, getCurrentMonth, getAvailableMonths, PORTUGUESE_MONTHS } from '../utils/monthUtils';
+import { recordTariffChange } from '../services/tariffAudit';
+import TariffHistoryModal from './TariffHistoryModal';
 
 interface VectraOS {
   id: string;
@@ -46,6 +49,29 @@ interface VectraOS {
   category: 'wifi' | 'utm';
   solution: string;
 }
+
+const VECTRA_LABELS: Record<string, string> = {
+  limitWifi: 'Limite Franquia Wi-Fi / UTM (CH)',
+  baseCostWifi: 'Custo Base Franquia Wi-Fi / UTM',
+  excedenteWifi: 'Valor O.S. Excedente Wi-Fi / UTM',
+  limitUtm: 'Limite Franquia UTM',
+  baseCostUtm: 'Custo Base Franquia UTM',
+  excedenteUtm: 'Valor O.S. Excedente UTM'
+};
+
+const VECTRA_CURRENCY: Record<string, boolean> = {
+  limitWifi: false,
+  baseCostWifi: true,
+  excedenteWifi: true,
+  limitUtm: false,
+  baseCostUtm: true,
+  excedenteUtm: true
+};
+
+const VECTRA_UNITS: Record<string, string> = {
+  limitWifi: 'CH',
+  limitUtm: 'CH'
+};
 
 // Programmatic realistic mock generator
 const generateMockRecords = (): VectraOS[] => {
@@ -122,6 +148,7 @@ export default function VectraBilling({ user }: { user?: UserSession | null }) {
   });
 
   const [showConfig, setShowConfig] = useState(false);
+  const [showTariffHistory, setShowTariffHistory] = useState(false);
   const [configLimitWifi, setConfigLimitWifi] = useState(60);
   const [configBaseCostWifi, setConfigBaseCostWifi] = useState(39400.20);
   const [configExcedenteWifi, setConfigExcedenteWifi] = useState(590.00);
@@ -212,15 +239,33 @@ export default function VectraBilling({ user }: { user?: UserSession | null }) {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const pricesDocRef = doc(db, 'systemPrices', 'vectra');
-      await setDoc(pricesDocRef, {
+      const newPrices = {
         limitWifi: Number(configLimitWifi) || 0,
         baseCostWifi: Number(configBaseCostWifi) || 0,
         excedenteWifi: Number(configExcedenteWifi) || 0,
         limitUtm: Number(configLimitUtm) || 0,
         baseCostUtm: Number(configBaseCostUtm) || 0,
         excedenteUtm: Number(configExcedenteUtm) || 0
-      });
+      };
+
+      try {
+        await recordTariffChange({
+          moduleId: 'vectra',
+          moduleName: 'Manutenção Vectra',
+          action: 'update',
+          user,
+          oldValues: vectraPrices as unknown as Record<string, number>,
+          newValues: newPrices,
+          labelsMap: VECTRA_LABELS,
+          currencyMap: VECTRA_CURRENCY,
+          unitMap: VECTRA_UNITS
+        });
+      } catch (auditErr) {
+        console.warn('Erro ao registrar log de auditoria Vectra:', auditErr);
+      }
+
+      const pricesDocRef = doc(db, 'systemPrices', 'vectra');
+      await setDoc(pricesDocRef, newPrices);
       showToast("Configurações do Contrato Vectra atualizadas com sucesso!");
       setShowConfig(false);
     } catch (err) {
@@ -976,13 +1021,14 @@ export default function VectraBilling({ user }: { user?: UserSession | null }) {
             </p>
           </div>
 
-          {/* Month Selector & Export Actions */}
-          <div className="flex flex-wrap items-center gap-3 bg-zinc-900/80 p-3 rounded-xl border border-zinc-750/80 backdrop-blur-xs">
-            <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-700 px-3 py-1.5 rounded-lg text-white">
+          {/* Month Selector & Export Actions (Month on top, action buttons below) */}
+          <div className="flex flex-col gap-2.5 bg-zinc-900/90 p-3 rounded-2xl border border-zinc-800 shadow-lg backdrop-blur-md w-full lg:w-auto">
+            {/* Top: Month Selector */}
+            <div className="flex items-center justify-between sm:justify-center gap-2 bg-zinc-950 border border-zinc-700/80 px-3 py-2 rounded-xl text-white shadow-inner">
               <button
                 type="button"
                 onClick={handlePrevMonth}
-                className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                className="p-1 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors cursor-pointer"
                 title="Mês Anterior"
               >
                 <ChevronLeft className="h-4 w-4" />
@@ -991,7 +1037,7 @@ export default function VectraBilling({ user }: { user?: UserSession | null }) {
               <select
                 value={referenceMonth}
                 onChange={(e) => setReferenceMonth(e.target.value)}
-                className="bg-transparent text-xs font-bold tracking-wide focus:outline-hidden cursor-pointer text-white px-2 py-0.5 text-center"
+                className="bg-transparent text-xs sm:text-sm font-bold tracking-wide focus:outline-hidden cursor-pointer text-white px-2 py-0.5 text-center"
               >
                 {availableMonths.map((m) => (
                   <option key={m} value={m} className="bg-zinc-900 text-white">
@@ -1003,42 +1049,55 @@ export default function VectraBilling({ user }: { user?: UserSession | null }) {
               <button
                 type="button"
                 onClick={handleNextMonth}
-                className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                className="p-1 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors cursor-pointer"
                 title="Próximo Mês"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setShowConfig(!showConfig)}
-              className="flex items-center gap-2 px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-850 text-white rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer duration-150 border border-zinc-700"
-              title="Ajustar Tarifas Contratuais"
-            >
-              <Wrench className="h-4 w-4" />
-              <span>{showConfig ? 'Fechar Tarifas' : 'Ajustar Tarifas'}</span>
-            </button>
+            {/* Bottom: Action Buttons */}
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowConfig(!showConfig)}
+                className="flex-1 sm:flex-initial px-3 py-2 bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-850 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer border border-zinc-700 hover:scale-102 active:scale-98 whitespace-nowrap"
+                title="Ajustar Tarifas Contratuais"
+              >
+                <Wrench className="h-4 w-4" />
+                <span>{showConfig ? 'Fechar Tarifas' : 'Ajustar Tarifas'}</span>
+              </button>
 
-            <button
-              type="button"
-              onClick={exportToExcel}
-              className="flex items-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer duration-150"
-              title="Exportar dados para Excel (.xlsx)"
-            >
-              <FileSpreadsheet className="h-4 w-4" />
-              <span>Planilha Excel</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => setShowTariffHistory(true)}
+                className="flex-1 sm:flex-initial px-3 py-2 bg-sky-950/70 hover:bg-sky-900 active:bg-sky-950 text-sky-300 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer border border-sky-800/80 hover:scale-102 active:scale-98 whitespace-nowrap"
+                title="Ver Histórico de Alterações de Tarifas"
+              >
+                <History className="h-4 w-4" />
+                <span>Histórico</span>
+              </button>
 
-            <button
-              type="button"
-              onClick={exportToPDF}
-              className="flex items-center gap-2 px-3.5 py-2 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer duration-150"
-              title="Exportar demonstrativo em PDF"
-            >
-              <FileText className="h-4 w-4" />
-              <span>Relatório PDF</span>
-            </button>
+              <button
+                type="button"
+                onClick={exportToExcel}
+                className="flex-1 sm:flex-initial px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer hover:scale-102 active:scale-98 whitespace-nowrap"
+                title="Exportar dados para Excel (.xlsx)"
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                <span>Planilha Excel</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={exportToPDF}
+                className="flex-1 sm:flex-initial px-3.5 py-2 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer hover:scale-102 active:scale-98 whitespace-nowrap"
+                title="Exportar demonstrativo em PDF"
+              >
+                <FileText className="h-4 w-4" />
+                <span>Relatório PDF</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1524,6 +1583,13 @@ export default function VectraBilling({ user }: { user?: UserSession | null }) {
           </div>
         </div>
       </div>
+      {/* Tariff Audit History Modal */}
+      <TariffHistoryModal
+        isOpen={showTariffHistory}
+        onClose={() => setShowTariffHistory(false)}
+        defaultModule="vectra"
+        user={user}
+      />
     </div>
   );
 }

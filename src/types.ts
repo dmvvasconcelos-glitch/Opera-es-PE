@@ -79,5 +79,32 @@ export interface LpuSettings {
   raioQuilometragem: string;
 }
 
+export type TariffModuleId = 'pvf' | 'contactCenter' | 'umtelecom' | 'starlink' | 'vectra';
+
+export interface TariffChangeItem {
+  key: string;
+  label: string;
+  oldValue: number;
+  newValue: number;
+  diff: number;
+  diffPercent: number;
+  isCurrency?: boolean;
+  unit?: string;
+}
+
+export interface TariffAuditLog {
+  id: string;
+  moduleId: TariffModuleId;
+  moduleName: string;
+  action: 'update' | 'reset';
+  timestamp: string;
+  formattedDate?: string;
+  userEmail: string;
+  userName: string;
+  userRole: string;
+  changes: TariffChangeItem[];
+  notes?: string;
+}
+
 export type ActiveTab = 'dashboard' | 'contratos' | 'relatorios' | 'precos' | 'usuarios' | 'historico' | 'contact-center' | 'um-telecom' | 'vectra' | 'starlink' | 'fornecedores' | 'parceiros' | 'lpu' | 'atividades' | 'saldo-contrato';
 

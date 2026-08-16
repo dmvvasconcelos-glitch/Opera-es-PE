@@ -296,6 +296,23 @@
         "atividadeLpuId", "atividadeLpuNome", "kmTotal", "valorKm",
         "valorMaterial", "valorAtividade", "valorTotal", "parceiroId", "parceiroNome"
       ]
+    },
+    "TariffAuditLog": {
+      "title": "Tariff Audit Log",
+      "description": "Immutable visual audit log for contractual tariff adjustments.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "moduleId": { "type": "string" },
+        "moduleName": { "type": "string" },
+        "action": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "userName": { "type": "string" },
+        "userRole": { "type": "string" },
+        "changes": { "type": "array" }
+      },
+      "required": ["id", "moduleId", "moduleName", "timestamp", "userEmail", "changes"]
     }
   },
   "firestore": {
@@ -346,6 +363,10 @@
     "/operationalActivities/{activityId}": {
       "schema": "OperationalActivity",
       "description": "Collection storing partner field operational activities (O.Ss) and automated faturamento details."
+    },
+    "/tariffAuditLogs/{logId}": {
+      "schema": "TariffAuditLog",
+      "description": "Collection storing immutable audit logs of contractual tariff changes across all modules."
     }
   }
 }

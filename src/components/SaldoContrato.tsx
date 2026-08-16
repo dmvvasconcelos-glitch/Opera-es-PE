@@ -27,8 +27,37 @@ import {
   ArrowUpRight,
   Info,
   Building2,
-  FileCheck
+  FileCheck,
+  Search,
+  X
 } from 'lucide-react';
+
+// Helper function to normalize secretaria names (unifying Secretaria de Saúde with Secretaria Estadual de Saúde)
+export const normalizeSecretariaName = (name?: string): string => {
+  if (!name) return 'Não informada';
+  const trimmed = name.trim();
+  const lower = trimmed.toLowerCase();
+  
+  // Unify health department variations into "Secretaria Estadual de Saúde"
+  if (
+    trimmed === 'Secretaria de Saúde' ||
+    trimmed === 'Secretaria de Saúde (SES)' ||
+    trimmed === 'SESAU - Secretaria de Saúde' ||
+    trimmed === 'SES - Secretaria de Saúde' ||
+    trimmed === 'Secretaria Estadual de Saúde' ||
+    trimmed.startsWith('Secretaria de Saúde') ||
+    lower.includes('secretaria de saúde') ||
+    lower.includes('secretaria de saude') ||
+    lower.includes('secretaria estadual de saúde') ||
+    lower.includes('secretaria estadual de saude') ||
+    lower === 'sesau' ||
+    lower.startsWith('sesau -') ||
+    lower.startsWith('ses -')
+  ) {
+    return 'Secretaria Estadual de Saúde';
+  }
+  return trimmed;
+};
 
 // Hardcoded Contract Limits as explicitly defined by contract rules
 export const PVF_CONTRACT_LIMITS: Record<PvfKey, number> = {
@@ -99,6 +128,7 @@ export default function SaldoContrato({
   // Navigation / View modes
   const [activeSubView, setActiveSubView] = useState<'consolidado' | 'pvf' | 'cc' | 'secretarias'>('consolidado');
   const [isContractModalOpen, setIsContractModalOpen] = useState(false);
+  const [secSearchTerm, setSecSearchTerm] = useState('');
 
   // Real-time Data states
   const [dbPvfRecords, setDbPvfRecords] = useState<Contract[]>([]);
@@ -167,7 +197,10 @@ export default function SaldoContrato({
           }
         }
 
-        const record = { ...data, id: originalId } as Contract;
+        const rawData = docSnap.data();
+        let sec = rawData.secretaria || '';
+        sec = normalizeSecretariaName(sec);
+        const record = { ...rawData, id: originalId, secretaria: sec } as Contract;
         const refMonthKey = (record.referenceMonth || '').toLowerCase().trim();
         const mapKey = `${refMonthKey}-${originalId}`;
         recordsMap.set(mapKey, record);
@@ -197,7 +230,9 @@ export default function SaldoContrato({
     const unsub = onSnapshot(q, (snapshot) => {
       const list: ContactCenterOS[] = [];
       snapshot.forEach(docSnap => {
-        list.push({ id: docSnap.id, ...docSnap.data() } as ContactCenterOS);
+        const raw = docSnap.data() as ContactCenterOS;
+        const sec = normalizeSecretariaName(raw.secretaria);
+        list.push({ id: docSnap.id, ...raw, secretaria: sec } as ContactCenterOS);
       });
       setCcRecords(list);
       if (list.length > 0) {
@@ -217,7 +252,11 @@ export default function SaldoContrato({
   // Filtered Records for Selected Month
   // -------------------------------------------------------------
   const basePvfContracts = useMemo(() => {
-    return pvfContracts && pvfContracts.length > 0 ? pvfContracts : INITIAL_CONTRACTS;
+    const list = pvfContracts && pvfContracts.length > 0 ? pvfContracts : INITIAL_CONTRACTS;
+    return list.map(c => ({
+      ...c,
+      secretaria: normalizeSecretariaName(c.secretaria)
+    }));
   }, [pvfContracts]);
 
   const activePvfContracts = useMemo(() => {
@@ -226,8 +265,8 @@ export default function SaldoContrato({
     // Filter records in collection for current selected referenceMonth
     let monthFiltered = dbPvfRecords.filter(r => r.referenceMonth === referenceMonth);
     if (user && user.role === 'cliente') {
-      const allowed = user.secretarias || [];
-      monthFiltered = monthFiltered.filter(r => allowed.includes(r.secretaria));
+      const allowed = (user.secretarias || []).map(normalizeSecretariaName);
+      monthFiltered = monthFiltered.filter(r => allowed.includes(normalizeSecretariaName(r.secretaria)));
     }
 
     const isFutureMonth = [
@@ -247,23 +286,26 @@ export default function SaldoContrato({
     const merged = basePvfContracts.map(c => {
       const custom = monthFiltered.find(r => r.id === c.id);
       if (custom) {
-        return { ...c, ...custom };
+        return { ...c, ...custom, secretaria: normalizeSecretariaName(custom.secretaria || c.secretaria) };
       }
-      return { ...c, referenceMonth };
+      return { ...c, referenceMonth, secretaria: normalizeSecretariaName(c.secretaria) };
     });
 
     // Include any newly created contracts in this month that don't exist in base contracts list
     const existingIds = new Set(basePvfContracts.map(c => c.id));
-    let newCustomContracts = monthFiltered.filter(r => !existingIds.has(r.id));
+    let newCustomContracts = monthFiltered.filter(r => !existingIds.has(r.id)).map(r => ({
+      ...r,
+      secretaria: normalizeSecretariaName(r.secretaria)
+    }));
     if (user && user.role === 'cliente') {
-      const allowed = user.secretarias || [];
-      newCustomContracts = newCustomContracts.filter(r => allowed.includes(r.secretaria));
+      const allowed = (user.secretarias || []).map(normalizeSecretariaName);
+      newCustomContracts = newCustomContracts.filter(r => allowed.includes(normalizeSecretariaName(r.secretaria)));
     }
 
     const result = [...merged, ...newCustomContracts];
     if (user && user.role === 'cliente') {
-      const allowed = user.secretarias || [];
-      return result.filter(r => allowed.includes(r.secretaria));
+      const allowed = (user.secretarias || []).map(normalizeSecretariaName);
+      return result.filter(r => allowed.includes(normalizeSecretariaName(r.secretaria)));
     }
     return result;
   }, [dbPvfRecords, basePvfContracts, referenceMonth, isZeroMonthSelected, user]);
@@ -274,14 +316,14 @@ export default function SaldoContrato({
     
     // Fallback to preseeded if collection is empty during initial load
     if (list.length === 0 && ccRecords.length === 0) {
-      list = PRESEEDED_CONTACT_CENTER.map(r => ({ ...r, referenceMonth }));
+      list = PRESEEDED_CONTACT_CENTER.map(r => ({ ...r, referenceMonth, secretaria: normalizeSecretariaName(r.secretaria) }));
     }
 
     if (user && user.role === 'cliente') {
-      const allowed = user.secretarias || [];
-      return list.filter(r => allowed.includes(r.secretaria));
+      const allowed = (user.secretarias || []).map(normalizeSecretariaName);
+      return list.filter(r => allowed.includes(normalizeSecretariaName(r.secretaria)));
     }
-    return list;
+    return list.map(r => ({ ...r, secretaria: normalizeSecretariaName(r.secretaria) }));
   }, [ccRecords, referenceMonth, isZeroMonthSelected, user]);
 
   // -------------------------------------------------------------
@@ -498,7 +540,7 @@ export default function SaldoContrato({
 
     // Sum PVF
     activePvfContracts.filter(c => c.status === 'Ativo').forEach(c => {
-      const sec = c.secretaria || 'Não informada';
+      const sec = normalizeSecretariaName(c.secretaria);
       const existing = secMap.get(sec) || {
         secretaria: sec,
         pvfQty: 0,
@@ -526,7 +568,7 @@ export default function SaldoContrato({
 
     // Sum CC
     activeCcRecords.filter(r => r.status === 'Ativo').forEach(r => {
-      const sec = r.secretaria || 'Não informada';
+      const sec = normalizeSecretariaName(r.secretaria);
       const existing = secMap.get(sec) || {
         secretaria: sec,
         pvfQty: 0,
@@ -550,8 +592,16 @@ export default function SaldoContrato({
       secMap.set(sec, existing);
     });
 
-    return Array.from(secMap.values()).sort((a, b) => b.totalVal - a.totalVal);
+    return Array.from(secMap.values()).sort((a, b) => a.secretaria.localeCompare(b.secretaria, 'pt-BR', { sensitivity: 'base' }));
   }, [activePvfContracts, activeCcRecords, currentPvfPrices, currentCcPrices]);
+
+  const filteredSecretariasMatrix = useMemo(() => {
+    if (!secSearchTerm.trim()) return secretariasMatrix;
+    const term = secSearchTerm.toLowerCase().trim();
+    return secretariasMatrix.filter(sec => 
+      sec.secretaria.toLowerCase().includes(term)
+    );
+  }, [secretariasMatrix, secSearchTerm]);
 
   // -------------------------------------------------------------
   // Navigation Month Helpers
@@ -876,12 +926,13 @@ export default function SaldoContrato({
             </p>
           </div>
 
-          {/* Month Selector & Export Actions */}
-          <div className="flex flex-wrap items-center gap-3 bg-zinc-900/80 p-3 rounded-xl border border-zinc-750/80 backdrop-blur-xs">
-            <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-700 px-3 py-1.5 rounded-lg text-white">
+          {/* Month Selector & Export Actions (Month on top, action buttons below) */}
+          <div className="flex flex-col gap-2.5 bg-zinc-900/90 p-3 rounded-2xl border border-zinc-800 shadow-lg backdrop-blur-md w-full lg:w-auto">
+            {/* Top: Month Selector */}
+            <div className="flex items-center justify-between sm:justify-center gap-2 bg-zinc-950 border border-zinc-700/80 px-3 py-2 rounded-xl text-white shadow-inner">
               <button
                 onClick={handlePrevMonth}
-                className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                className="p-1 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors cursor-pointer"
                 title="Mês Anterior"
               >
                 <ChevronLeft className="h-4 w-4" />
@@ -890,7 +941,7 @@ export default function SaldoContrato({
               <select
                 value={referenceMonth}
                 onChange={(e) => setReferenceMonth(e.target.value)}
-                className="bg-transparent text-xs font-bold tracking-wide focus:outline-hidden cursor-pointer text-white px-2 py-0.5 text-center"
+                className="bg-transparent text-xs sm:text-sm font-bold tracking-wide focus:outline-hidden cursor-pointer text-white px-2 py-0.5 text-center"
               >
                 {availableMonths.map((m) => (
                   <option key={m} value={m} className="bg-zinc-900 text-white">
@@ -901,39 +952,42 @@ export default function SaldoContrato({
 
               <button
                 onClick={handleNextMonth}
-                className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                className="p-1 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors cursor-pointer"
                 title="Próximo Mês"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
 
-            <button
-              onClick={() => setIsContractModalOpen(true)}
-              className="px-3.5 py-2 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-1.5 transition-all cursor-pointer hover:scale-102 active:scale-98"
-              title="Visualizar e baixar documento oficial do Contrato (SEI/GOVPE)"
-            >
-              <FileCheck className="h-4 w-4" />
-              <span>Visualizar Contrato</span>
-            </button>
+            {/* Bottom: Action Buttons */}
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+              <button
+                onClick={() => setIsContractModalOpen(true)}
+                className="flex-1 sm:flex-initial px-3.5 py-2 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-xl shadow-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer hover:scale-102 active:scale-98 whitespace-nowrap"
+                title="Visualizar e baixar documento oficial do Contrato (SEI/GOVPE)"
+              >
+                <FileCheck className="h-4 w-4" />
+                <span>Visualizar Contrato</span>
+              </button>
 
-            <button
-              onClick={exportPDF}
-              className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-1.5 transition-all cursor-pointer hover:scale-102 active:scale-98"
-              title="Exportar Relatório em PDF"
-            >
-              <FileText className="h-4 w-4" />
-              <span>PDF</span>
-            </button>
+              <button
+                onClick={exportPDF}
+                className="flex-1 sm:flex-initial px-3 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl shadow-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer hover:scale-102 active:scale-98 whitespace-nowrap"
+                title="Exportar Relatório em PDF"
+              >
+                <FileText className="h-4 w-4" />
+                <span>PDF</span>
+              </button>
 
-            <button
-              onClick={exportExcel}
-              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-1.5 transition-all cursor-pointer hover:scale-102 active:scale-98"
-              title="Exportar Planilha Excel"
-            >
-              <FileSpreadsheet className="h-4 w-4" />
-              <span>Excel</span>
-            </button>
+              <button
+                onClick={exportExcel}
+                className="flex-1 sm:flex-initial px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer hover:scale-102 active:scale-98 whitespace-nowrap"
+                title="Exportar Planilha Excel"
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                <span>Excel</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1299,14 +1353,14 @@ export default function SaldoContrato({
                 <div className="flex items-center gap-2">
                   <Headset className="h-4.5 w-4.5 text-purple-500 dark:text-purple-400" />
                   <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-800 dark:text-zinc-200">
-                    Contact Center - Itens do Contrato
+                    Contact Center - Itens do Contrato (6 Itens)
                   </h4>
                 </div>
                 <button
                   onClick={() => setActiveSubView('cc')}
                   className="text-xs text-brand dark:text-brand-light font-bold hover:underline flex items-center gap-1 cursor-pointer"
                 >
-                  <span>Ver todos (6)</span>
+                  <span>Ver tabela completa</span>
                   <ArrowUpRight className="h-3.5 w-3.5" />
                 </button>
               </div>
@@ -1598,9 +1652,9 @@ export default function SaldoContrato({
       {activeSubView === 'secretarias' && (
         <div className="space-y-6 animate-fade-in">
           <div className="rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800/80 overflow-hidden shadow-xs">
-            <div className="p-4 sm:p-5 border-b border-zinc-200 dark:border-zinc-800/80 flex items-center justify-between bg-zinc-50/70 dark:bg-zinc-900/90">
+            <div className="p-4 sm:p-5 border-b border-zinc-200 dark:border-zinc-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-zinc-50/70 dark:bg-zinc-900/90">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-brand/10 dark:bg-brand/20 text-brand dark:text-brand-light border border-brand/20 dark:border-brand/30 rounded-xl">
+                <div className="p-2.5 bg-brand/10 dark:bg-brand/20 text-brand dark:text-brand-light border border-brand/20 dark:border-brand/30 rounded-xl shrink-0">
                   <Building2 className="h-5 w-5" />
                 </div>
                 <div>
@@ -1612,9 +1666,35 @@ export default function SaldoContrato({
                   </p>
                 </div>
               </div>
-              <span className="text-xs font-mono font-bold text-zinc-600 dark:text-zinc-300">
-                {secretariasMatrix.length} órgãos listados
-              </span>
+
+              <div className="flex items-center gap-3 w-full sm:w-auto">
+                <div className="relative flex-1 sm:w-72">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 dark:text-zinc-500" />
+                  <input
+                    type="text"
+                    value={secSearchTerm}
+                    onChange={(e) => setSecSearchTerm(e.target.value)}
+                    placeholder="Buscar órgão ou secretaria..."
+                    className="w-full pl-9 pr-8 py-2 text-xs rounded-xl bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:outline-hidden focus:ring-2 focus:ring-brand/40 dark:focus:ring-brand/50 focus:border-brand dark:focus:border-brand transition-all font-medium shadow-2xs"
+                  />
+                  {secSearchTerm && (
+                    <button
+                      onClick={() => setSecSearchTerm('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-0.5 rounded-md transition-colors"
+                      title="Limpar pesquisa"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                <span className="text-xs font-mono font-bold text-zinc-600 dark:text-zinc-300 shrink-0 whitespace-nowrap bg-zinc-100 dark:bg-zinc-800 px-2.5 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700">
+                  {secSearchTerm.trim() 
+                    ? `${filteredSecretariasMatrix.length} de ${secretariasMatrix.length} órgãos`
+                    : `${secretariasMatrix.length} órgãos listados`
+                  }
+                </span>
+              </div>
             </div>
 
             <div className="table-scrollbar-fluid">
@@ -1632,7 +1712,7 @@ export default function SaldoContrato({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-200/70 dark:divide-zinc-800/60 font-medium">
-                  {secretariasMatrix.map((sec, idx) => {
+                  {filteredSecretariasMatrix.map((sec, idx) => {
                     const pctOfTotal = grandTotals.usedVal > 0 ? (sec.totalVal / grandTotals.usedVal) * 100 : 0;
                     return (
                       <tr key={sec.secretaria} className="hover:bg-zinc-500/[0.04] dark:hover:bg-white/[0.03] transition-colors">
@@ -1674,10 +1754,26 @@ export default function SaldoContrato({
                       </tr>
                     );
                   })}
-                  {secretariasMatrix.length === 0 && (
+                  {filteredSecretariasMatrix.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="py-8 text-center text-zinc-400 dark:text-zinc-500">
-                        Nenhuma secretaria ou órgão encontrado.
+                      <td colSpan={8} className="py-12 text-center text-zinc-400 dark:text-zinc-500">
+                        <div className="flex flex-col items-center justify-center gap-2">
+                          <Search className="h-6 w-6 text-zinc-300 dark:text-zinc-600" />
+                          <p className="text-sm font-medium text-zinc-600 dark:text-zinc-400">
+                            {secSearchTerm.trim()
+                              ? `Nenhum órgão ou secretaria encontrado para "${secSearchTerm}".`
+                              : 'Nenhuma secretaria ou órgão encontrado.'
+                            }
+                          </p>
+                          {secSearchTerm.trim() && (
+                            <button
+                              onClick={() => setSecSearchTerm('')}
+                              className="mt-1 text-xs font-semibold text-brand hover:underline"
+                            >
+                              Limpar busca
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   )}

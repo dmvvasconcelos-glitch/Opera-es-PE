@@ -45,6 +45,8 @@ import {
   Globe,
   Satellite,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CalendarClock,
   Phone,
   Shield,
@@ -257,7 +259,7 @@ const PRESEEDED_CONTACT_CENTER: ContactCenterOS[] = [
   {
     id: 'cc-preseed-2',
     contrato: 'CT-2026/089',
-    secretaria: 'Secretaria de Saúde (SES)',
+    secretaria: 'Secretaria Estadual de Saúde',
     referenceMonth: 'Junho/2026',
     status: 'Ativo',
     nmsBasico: 6,
@@ -1005,7 +1007,22 @@ export default function Dashboard({ contracts, prices, user, onSelectTab }: Dash
     const unsubscribe = onSnapshot(collectionRef, (snapshot) => {
       const list: ContactCenterOS[] = [];
       snapshot.forEach((docSnap) => {
-        list.push({ id: docSnap.id, ...docSnap.data() } as ContactCenterOS);
+        const raw = docSnap.data() as ContactCenterOS;
+        let sec = raw.secretaria || '';
+        if (
+          sec === 'Secretaria de Saúde' ||
+          sec === 'Secretaria de Saúde (SES)' ||
+          sec === 'SESAU - Secretaria de Saúde' ||
+          sec === 'Secretaria Estadual de Saúde' ||
+          sec.startsWith('Secretaria de Saúde') ||
+          sec.toLowerCase().includes('secretaria de saúde') ||
+          sec.toLowerCase().includes('secretaria de saude') ||
+          sec.toLowerCase().includes('secretaria estadual de saúde') ||
+          sec.toLowerCase().includes('secretaria estadual de saude')
+        ) {
+          sec = 'Secretaria Estadual de Saúde';
+        }
+        list.push({ id: docSnap.id, ...raw, secretaria: sec } as ContactCenterOS);
       });
       setDbCcRecords(list);
       localStorage.setItem('cc_offline_records', JSON.stringify(list));
@@ -1904,39 +1921,79 @@ export default function Dashboard({ contracts, prices, user, onSelectTab }: Dash
   const VIBRANT_PVF_COLORS = ['#4f46e5', '#0284c7', '#7c3aed', '#ec4899', '#06b6d4'];
   const VIBRANT_GENERAL_COLORS = ['#0d9488', '#10b981', '#f59e0b', '#3b82f6', '#8b5cf6'];
 
+  const availableMonths = useMemo(() => getAvailableMonths(), []);
+
+  const handlePrevMonth = () => {
+    const idx = availableMonths.indexOf(referenceMonth);
+    if (idx > 0) setReferenceMonth(availableMonths[idx - 1]);
+  };
+
+  const handleNextMonth = () => {
+    const idx = availableMonths.indexOf(referenceMonth);
+    if (idx < availableMonths.length - 1) setReferenceMonth(availableMonths[idx + 1]);
+  };
+
   return (
     <div className="space-y-8">
       {/* HEADER SECTION WITH MONTH SELECTOR */}
-      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 bg-white dark:bg-zinc-900 p-5 rounded-2xl border border-zinc-200/85 dark:border-zinc-800 shadow-xs">
-        <div>
-          <h2 className="text-xl font-black text-zinc-950 dark:text-zinc-50 tracking-tight flex items-center gap-2 font-display">
-            <Layers className="h-5.5 w-5.5 text-brand" />
-            <span>Painel Gerencial de Faturamento</span>
-          </h2>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Consolidação geral do faturamento do projeto PECONECTADO II.
-          </p>
-        </div>
-        
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Competence Month Selector */}
-          <div className="flex items-center gap-2 bg-zinc-55 dark:bg-zinc-950 px-3.5 py-2 rounded-xl border border-zinc-200/80 dark:border-zinc-805">
-            <CalendarClock className="h-4 w-4 text-zinc-400 shrink-0" />
-            <span className="text-[10px] text-zinc-400 font-extrabold uppercase tracking-widest font-mono">Competência:</span>
-            <select
-              value={referenceMonth}
-              onChange={(e) => setReferenceMonth(e.target.value)}
-              className="bg-transparent text-xs font-black text-zinc-800 dark:text-white focus:outline-none cursor-pointer pr-3 outline-none"
-            >
-              {getAvailableMonths().map(m => (
-                <option key={m} value={m} className="bg-white dark:bg-zinc-900 text-zinc-800 dark:text-white font-bold">{m}</option>
-              ))}
-            </select>
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950 p-6 text-white shadow-xl border border-zinc-800">
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+          <div className="space-y-1.5 max-w-2xl">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-800/80 border border-zinc-700/80 text-[11px] font-bold text-brand-light uppercase tracking-wider backdrop-blur-xs">
+              <Layers className="h-3.5 w-3.5 text-brand" />
+              <span>PAINEL EXECUTIVO</span>
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white font-sans flex items-center gap-2.5">
+              <Layers className="h-7 w-7 text-brand" />
+              <span>Painel Gerencial de Faturamento</span>
+            </h1>
+            <p className="text-xs sm:text-sm text-zinc-300 font-sans leading-relaxed">
+              Consolidação geral do faturamento do projeto PECONECTADO II.
+            </p>
           </div>
 
-          <div className="bg-brand/5 dark:bg-zinc-900 text-brand dark:text-brand-light px-3 py-1.5 rounded-lg border border-brand/20 dark:border-zinc-800 text-[11px] font-mono font-bold flex items-center gap-1.5 font-sans">
-            <ShieldCheck className="h-3.5 w-3.5" />
-            <span>Faturamento Ativo</span>
+          {/* Month Selector & Status Pill (Month on top, badge below) */}
+          <div className="flex flex-col gap-2.5 bg-zinc-900/90 p-3 rounded-2xl border border-zinc-800 shadow-lg backdrop-blur-md w-full lg:w-auto">
+            {/* Top: Month Selector */}
+            <div className="flex items-center justify-between sm:justify-center gap-2 bg-zinc-950 border border-zinc-700/80 px-3 py-2 rounded-xl text-white shadow-inner">
+              <button
+                type="button"
+                onClick={handlePrevMonth}
+                className="p-1 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                title="Mês Anterior"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+
+              <select
+                value={referenceMonth}
+                onChange={(e) => setReferenceMonth(e.target.value)}
+                className="bg-transparent text-xs sm:text-sm font-bold tracking-wide focus:outline-hidden cursor-pointer text-white px-2 py-0.5 text-center"
+              >
+                {availableMonths.map((m) => (
+                  <option key={m} value={m} className="bg-zinc-900 text-white">
+                    {m}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                onClick={handleNextMonth}
+                className="p-1 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                title="Próximo Mês"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Bottom: Action / Status Badge */}
+            <div className="flex items-center justify-center">
+              <div className="w-full bg-brand/10 text-brand-light px-3.5 py-1.5 rounded-xl border border-brand/20 text-[11px] font-mono font-bold flex items-center justify-center gap-1.5 shadow-sm">
+                <ShieldCheck className="h-3.5 w-3.5 text-brand" />
+                <span>Faturamento Ativo ({referenceMonth})</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>

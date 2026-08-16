@@ -31,6 +31,8 @@ import {
   Sparkles,
   Info,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Edit2,
   Eye,
   Users
@@ -902,6 +904,16 @@ export default function AtividadesManagement({ currentUser }: AtividadesManageme
     }
   };
 
+  const handlePrevMonth = () => {
+    const idx = availableMonths.indexOf(referenceMonth);
+    if (idx > 0) setReferenceMonth(availableMonths[idx - 1]);
+  };
+
+  const handleNextMonth = () => {
+    const idx = availableMonths.indexOf(referenceMonth);
+    if (idx < availableMonths.length - 1) setReferenceMonth(availableMonths[idx + 1]);
+  };
+
   return (
     <div className="w-full space-y-6">
       
@@ -938,40 +950,60 @@ export default function AtividadesManagement({ currentUser }: AtividadesManageme
             </p>
           </div>
           
-          {/* Month Selector and Action Buttons */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
-            <div className="flex flex-col justify-center bg-zinc-50 dark:bg-zinc-950 px-5 py-3 rounded-2.5xl border border-zinc-200/50 dark:border-zinc-850/65 min-w-[220px]">
-              <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest font-mono">Mês de Referência</span>
-              <div className="relative mt-1">
-                <select
-                  value={referenceMonth}
-                  onChange={(e) => setReferenceMonth(e.target.value)}
-                  className="w-full bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-bold text-zinc-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-cyan-500 appearance-none cursor-pointer pr-10 shadow-xs"
-                >
-                  {availableMonths.map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-3.5 top-2.5 h-4 w-4 text-zinc-400 pointer-events-none" />
-              </div>
+          {/* Month Selector & Export Actions (Month on top, action buttons below) */}
+          <div className="flex flex-col gap-2.5 bg-zinc-900/90 p-3 rounded-2xl border border-zinc-800 shadow-lg backdrop-blur-md w-full lg:w-auto">
+            {/* Top: Month Selector */}
+            <div className="flex items-center justify-between sm:justify-center gap-2 bg-zinc-950 border border-zinc-700/80 px-3 py-2 rounded-xl text-white shadow-inner">
+              <button
+                type="button"
+                onClick={handlePrevMonth}
+                className="p-1 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                title="Mês Anterior"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+
+              <select
+                value={referenceMonth}
+                onChange={(e) => setReferenceMonth(e.target.value)}
+                className="bg-transparent text-xs sm:text-sm font-bold tracking-wide focus:outline-hidden cursor-pointer text-white px-2 py-0.5 text-center"
+              >
+                {availableMonths.map((m) => (
+                  <option key={m} value={m} className="bg-zinc-900 text-white">
+                    {m}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                onClick={handleNextMonth}
+                className="p-1 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                title="Próximo Mês"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
             </div>
 
-            <div className="flex flex-row sm:flex-col gap-2 shrink-0">
+            {/* Bottom: Action Buttons */}
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
               <button
+                type="button"
                 onClick={exportExcel}
-                className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all shadow-xs cursor-pointer active:scale-95 duration-150"
+                className="flex-1 sm:flex-initial px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer hover:scale-102 active:scale-98 whitespace-nowrap"
                 title="Exportar dados filtrados para Microsoft Excel (.xlsx)"
               >
-                <FileSpreadsheet className="h-4 w-4 text-white" />
+                <FileSpreadsheet className="h-4 w-4" />
                 <span>Planilha Excel</span>
               </button>
 
               <button
+                type="button"
                 onClick={exportPDF}
-                className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all shadow-xs cursor-pointer active:scale-95 duration-150"
+                className="flex-1 sm:flex-initial px-3.5 py-2 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer hover:scale-102 active:scale-98 whitespace-nowrap"
                 title="Gerar e salvar relatório de faturamento em arquivo PDF"
               >
-                <FileText className="h-4 w-4 text-white" />
+                <FileText className="h-4 w-4" />
                 <span>Relatório PDF</span>
               </button>
             </div>

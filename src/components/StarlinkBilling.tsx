@@ -24,7 +24,8 @@ import {
   Wifi,
   FileSpreadsheet,
   Sliders,
-  ShieldAlert
+  ShieldAlert,
+  History
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
@@ -32,6 +33,8 @@ import { db, handleFirestoreError, OperationType, cleanUndefined, onSnapshot, ge
 import { collection, doc } from 'firebase/firestore';
 import { UserSession } from '../types';
 import { useCurrentMonthFilter, getCurrentMonth, getAvailableMonths, PORTUGUESE_MONTHS } from '../utils/monthUtils';
+import { recordTariffChange } from '../services/tariffAudit';
+import TariffHistoryModal from './TariffHistoryModal';
 
 interface StarlinkOS {
   id: string;
@@ -50,6 +53,12 @@ const CONSTANTS = {
   COST_INTERIOR: 1760.00,
   COST_NORONHA: 1820.00,
   COST_NOVO_PCM: 3500.00
+};
+
+const STARLINK_LABELS: Record<string, string> = {
+  costInterior: 'Starlink Interior (Instalação)',
+  costNoronha: 'Starlink Noronha (Instalação)',
+  costNovoPCM: 'Novas Ativações PCM (Estrutural)'
 };
 
 const PRESEEDED_STARLINK_RECORDS: StarlinkOS[] = [
@@ -130,6 +139,7 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
 
   // Tariff adjustment configuration form states
   const [showConfig, setShowConfig] = useState(false);
+  const [showTariffHistory, setShowTariffHistory] = useState(false);
   const [configCostInterior, setConfigCostInterior] = useState(1760.00);
   const [configCostNoronha, setConfigCostNoronha] = useState(1820.00);
   const [configCostNovoPCM, setConfigCostNovoPCM] = useState(3500.00);
@@ -509,10 +519,28 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
     e.preventDefault();
     setIsLoading(true);
     try {
-      await setDoc(doc(db, 'systemPrices', 'starlink'), {
+      const newPrices = {
         costInterior: Number(configCostInterior),
         costNoronha: Number(configCostNoronha),
-        costNovoPCM: Number(configCostNovoPCM),
+        costNovoPCM: Number(configCostNovoPCM)
+      };
+
+      try {
+        await recordTariffChange({
+          moduleId: 'starlink',
+          moduleName: 'Implantação Starlink',
+          action: 'update',
+          user,
+          oldValues: starlinkPrices as unknown as Record<string, number>,
+          newValues: newPrices,
+          labelsMap: STARLINK_LABELS
+        });
+      } catch (auditErr) {
+        console.warn('Erro ao registrar log de auditoria Starlink:', auditErr);
+      }
+
+      await setDoc(doc(db, 'systemPrices', 'starlink'), {
+        ...newPrices,
         updatedAt: new Date().toISOString()
       }, { merge: true });
       showToast("Configurações da Starlink salvas com sucesso!", "success");
@@ -822,13 +850,14 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
             </p>
           </div>
 
-          {/* Month Selector & Export Actions */}
-          <div className="flex flex-wrap items-center gap-3 bg-zinc-900/80 p-3 rounded-xl border border-zinc-750/80 backdrop-blur-xs">
-            <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-700 px-3 py-1.5 rounded-lg text-white">
+          {/* Month Selector & Export Actions (Month on top, action buttons below) */}
+          <div className="flex flex-col gap-2.5 bg-zinc-900/90 p-3 rounded-2xl border border-zinc-800 shadow-lg backdrop-blur-md w-full lg:w-auto">
+            {/* Top: Month Selector */}
+            <div className="flex items-center justify-between sm:justify-center gap-2 bg-zinc-950 border border-zinc-700/80 px-3 py-2 rounded-xl text-white shadow-inner">
               <button
                 type="button"
                 onClick={handlePrevMonth}
-                className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                className="p-1 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors cursor-pointer"
                 title="Mês Anterior"
               >
                 <ChevronLeft className="h-4 w-4" />
@@ -837,7 +866,7 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
               <select
                 value={referenceMonth}
                 onChange={(e) => setReferenceMonth(e.target.value)}
-                className="bg-transparent text-xs font-bold tracking-wide focus:outline-hidden cursor-pointer text-white px-2 py-0.5 text-center"
+                className="bg-transparent text-xs sm:text-sm font-bold tracking-wide focus:outline-hidden cursor-pointer text-white px-2 py-0.5 text-center"
               >
                 {availableMonths.map((m) => (
                   <option key={m} value={m} className="bg-zinc-900 text-white">
@@ -849,42 +878,55 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
               <button
                 type="button"
                 onClick={handleNextMonth}
-                className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                className="p-1 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors cursor-pointer"
                 title="Próximo Mês"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setShowConfig(!showConfig)}
-              className="flex items-center gap-2 px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-850 text-white rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer duration-150 border border-zinc-700"
-              title="Ajustar Tarifas Contratuais"
-            >
-              <Sliders className="h-4 w-4" />
-              <span>Ajustar Tarifas</span>
-            </button>
+            {/* Bottom: Action Buttons */}
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowConfig(!showConfig)}
+                className="flex-1 sm:flex-initial px-3 py-2 bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-850 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer border border-zinc-700 hover:scale-102 active:scale-98 whitespace-nowrap"
+                title="Ajustar Tarifas Contratuais"
+              >
+                <Sliders className="h-4 w-4" />
+                <span>Ajustar Tarifas</span>
+              </button>
 
-            <button
-              type="button"
-              onClick={exportToExcel}
-              className="flex items-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer duration-150"
-              title="Exportar dados para Excel (.xlsx)"
-            >
-              <FileSpreadsheet className="h-4 w-4" />
-              <span>Planilha Excel</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => setShowTariffHistory(true)}
+                className="flex-1 sm:flex-initial px-3 py-2 bg-sky-950/70 hover:bg-sky-900 active:bg-sky-950 text-sky-300 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer border border-sky-800/80 hover:scale-102 active:scale-98 whitespace-nowrap"
+                title="Ver Histórico de Alterações de Tarifas"
+              >
+                <History className="h-4 w-4" />
+                <span>Histórico</span>
+              </button>
 
-            <button
-              type="button"
-              onClick={exportToPDF}
-              className="flex items-center gap-2 px-3.5 py-2 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer duration-150"
-              title="Exportar demonstrativo em PDF"
-            >
-              <FileText className="h-4 w-4" />
-              <span>Relatório PDF</span>
-            </button>
+              <button
+                type="button"
+                onClick={exportToExcel}
+                className="flex-1 sm:flex-initial px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer hover:scale-102 active:scale-98 whitespace-nowrap"
+                title="Exportar dados para Excel (.xlsx)"
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                <span>Planilha Excel</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={exportToPDF}
+                className="flex-1 sm:flex-initial px-3.5 py-2 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer hover:scale-102 active:scale-98 whitespace-nowrap"
+                title="Exportar demonstrativo em PDF"
+              >
+                <FileText className="h-4 w-4" />
+                <span>Relatório PDF</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1381,6 +1423,14 @@ export default function StarlinkBilling({ user }: { user?: UserSession | null })
           </div>
         </div>
       </div>
+
+      {/* Tariff Audit History Modal */}
+      <TariffHistoryModal
+        isOpen={showTariffHistory}
+        onClose={() => setShowTariffHistory(false)}
+        defaultModule="starlink"
+        user={user}
+      />
     </div>
   );
 }

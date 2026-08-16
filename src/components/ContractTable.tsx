@@ -39,9 +39,12 @@ import {
   ArrowDownRight,
   Layers,
   Building2,
-  DollarSign
+  DollarSign,
+  History
 } from 'lucide-react';
 import { useCurrentMonthFilter, getCurrentMonth, getPreviousMonth, getAvailableMonths, isUnseededMonth } from '../utils/monthUtils';
+import { recordTariffChange } from '../services/tariffAudit';
+import TariffHistoryModal from './TariffHistoryModal';
 
 const mapMonthToAscii = (month: string) => {
   return month
@@ -87,6 +90,7 @@ export default function ContractTable({
   // Editing Unit Price Inline
   const [isEditingPrices, setIsEditingPrices] = useState(false);
   const [tempPrices, setTempPrices] = useState<PvfPrices>({ ...prices });
+  const [showTariffHistory, setShowTariffHistory] = useState(false);
 
   useEffect(() => {
     if (!isEditingPrices) {
@@ -576,7 +580,20 @@ export default function ContractTable({
   };
 
   // Inline pricing edits save
-  const handleSavePrices = () => {
+  const handleSavePrices = async () => {
+    try {
+      await recordTariffChange({
+        moduleId: 'pvf',
+        moduleName: 'Pontos de Voz (PVF)',
+        action: 'update',
+        user,
+        oldValues: prices as unknown as Record<string, number>,
+        newValues: tempPrices as unknown as Record<string, number>,
+        labelsMap: PVF_LABELS
+      });
+    } catch (auditErr) {
+      console.warn('Erro ao registrar log de auditoria de tarifas:', auditErr);
+    }
     onUpdatePrices(tempPrices);
     setIsEditingPrices(false);
     showNotification('Valores unitários salvos e faturamento recalculado!');
@@ -587,7 +604,21 @@ export default function ContractTable({
     setIsEditingPrices(false);
   };
 
-  const handleResetDefaultPrices = () => {
+  const handleResetDefaultPrices = async () => {
+    try {
+      await recordTariffChange({
+        moduleId: 'pvf',
+        moduleName: 'Pontos de Voz (PVF)',
+        action: 'reset',
+        user,
+        oldValues: prices as unknown as Record<string, number>,
+        newValues: INITIAL_PRICES as unknown as Record<string, number>,
+        labelsMap: PVF_LABELS,
+        notes: 'Tarifas restauradas aos valores unitários padrão do edital.'
+      });
+    } catch (auditErr) {
+      console.warn('Erro ao registrar log de auditoria de tarifas:', auditErr);
+    }
     setTempPrices({ ...INITIAL_PRICES });
     onUpdatePrices(INITIAL_PRICES);
     setIsEditingPrices(false);
@@ -1422,12 +1453,13 @@ export default function ContractTable({
             </p>
           </div>
 
-          {/* Month Selector & Export Actions */}
-          <div className="flex flex-wrap items-center gap-3 bg-zinc-900/80 p-3 rounded-xl border border-zinc-750/80 backdrop-blur-xs">
-            <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-700 px-3 py-1.5 rounded-lg text-white">
+          {/* Month Selector & Export Actions (Month on top, action buttons below) */}
+          <div className="flex flex-col gap-2.5 bg-zinc-900/90 p-3 rounded-2xl border border-zinc-800 shadow-lg backdrop-blur-md w-full lg:w-auto">
+            {/* Top: Month Selector */}
+            <div className="flex items-center justify-between sm:justify-center gap-2 bg-zinc-950 border border-zinc-700/80 px-3 py-2 rounded-xl text-white shadow-inner">
               <button
                 onClick={handlePrevMonth}
-                className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                className="p-1 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors cursor-pointer"
                 title="Mês Anterior"
               >
                 <ChevronLeft className="h-4 w-4" />
@@ -1439,7 +1471,7 @@ export default function ContractTable({
                   setReferenceMonth(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="bg-transparent text-xs font-bold tracking-wide focus:outline-hidden cursor-pointer text-white px-2 py-0.5 text-center"
+                className="bg-transparent text-xs sm:text-sm font-bold tracking-wide focus:outline-hidden cursor-pointer text-white px-2 py-0.5 text-center"
               >
                 {availableMonths.map((m) => (
                   <option key={m} value={m} className="bg-zinc-900 text-white">
@@ -1450,30 +1482,33 @@ export default function ContractTable({
 
               <button
                 onClick={handleNextMonth}
-                className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                className="p-1 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors cursor-pointer"
                 title="Próximo Mês"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
 
-            <button
-              onClick={exportToExcel}
-              className="flex items-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer duration-150"
-              title="Exportar dados para Excel (.xlsx)"
-            >
-              <FileSpreadsheet className="h-4 w-4" />
-              <span>Planilha Excel</span>
-            </button>
+            {/* Bottom: Action Buttons */}
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+              <button
+                onClick={exportToExcel}
+                className="flex-1 sm:flex-initial px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer hover:scale-102 active:scale-98 whitespace-nowrap"
+                title="Exportar dados para Excel (.xlsx)"
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                <span>Planilha Excel</span>
+              </button>
 
-            <button
-              onClick={exportToPdf}
-              className="flex items-center gap-2 px-3.5 py-2 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer duration-150"
-              title="Exportar demonstrativo em PDF"
-            >
-              <FileText className="h-4 w-4" />
-              <span>Relatório PDF</span>
-            </button>
+              <button
+                onClick={exportToPdf}
+                className="flex-1 sm:flex-initial px-3.5 py-2 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer hover:scale-102 active:scale-98 whitespace-nowrap"
+                title="Exportar demonstrativo em PDF"
+              >
+                <FileText className="h-4 w-4" />
+                <span>Relatório PDF</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1830,16 +1865,27 @@ export default function ContractTable({
                         </button>
                       </div>
                     ) : (
-                      <button
-                        onClick={() => {
-                          setTempPrices({ ...prices });
-                          setIsEditingPrices(true);
-                        }}
-                        className="flex items-center gap-1 mx-auto text-[10px] px-2 py-0.5 bg-white hover:bg-sky-100 dark:bg-zinc-800 border border-sky-300 dark:border-sky-850 text-sky-700 dark:text-sky-400 font-bold rounded shadow-sm transition-all"
-                      >
-                        <Settings className="h-2.5 w-2.5" />
-                        <span>Alterar Tarifas</span>
-                      </button>
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={() => {
+                            setTempPrices({ ...prices });
+                            setIsEditingPrices(true);
+                          }}
+                          className="flex items-center gap-1 text-[10px] px-2 py-0.5 bg-white hover:bg-sky-100 dark:bg-zinc-800 border border-sky-300 dark:border-sky-850 text-sky-700 dark:text-sky-400 font-bold rounded shadow-sm transition-all"
+                        >
+                          <Settings className="h-2.5 w-2.5" />
+                          <span>Alterar Tarifas</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowTariffHistory(true)}
+                          title="Ver Histórico de Alterações de Tarifas"
+                          className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/50 border border-sky-300 dark:border-sky-800 text-sky-700 dark:text-sky-300 font-bold rounded shadow-sm transition-all"
+                        >
+                          <History className="h-2.5 w-2.5" />
+                          <span>Histórico</span>
+                        </button>
+                      </div>
                     )}
                   </td>
                 )}
@@ -2897,6 +2943,14 @@ export default function ContractTable({
           </div>
         </div>
       )}
+
+      {/* ================= TARIFF AUDIT HISTORY MODAL ================= */}
+      <TariffHistoryModal
+        isOpen={showTariffHistory}
+        onClose={() => setShowTariffHistory(false)}
+        defaultModule="pvf"
+        user={user}
+      />
 
     </div>
   );
